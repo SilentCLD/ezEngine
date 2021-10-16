@@ -4,11 +4,13 @@
 #include <RendererCore/Lights/DirectionalLightComponent.h>
 #include <RendererCore/Lights/PointLightComponent.h>
 #include <RendererCore/Lights/SpotLightComponent.h>
+#include <RendererCore/Lights/SphereReflectionProbeComponent.h>
 #include <RendererFoundation/Shader/ShaderUtils.h>
 
 #include <RendererCore/../../../Data/Base/Shaders/Common/LightData.h>
 EZ_DEFINE_AS_POD_TYPE(ezPerLightData);
 EZ_DEFINE_AS_POD_TYPE(ezPerDecalData);
+EZ_DEFINE_AS_POD_TYPE(ezPerReflectionProbeData);
 EZ_DEFINE_AS_POD_TYPE(ezPerClusterData);
 
 #include <Core/Graphics/Camera.h>
@@ -200,6 +202,27 @@ namespace
     perDecalData.ormAtlasOffset = pDecalRenderData->m_uiORMAtlasOffset;
   }
 
+  void FillReflectionProbeData(ezPerReflectionProbeData& perReflectionProbeData, const ezReflectionProbeRenderData* pReflectionProbeRenderData)
+  {
+    ezVec3 position = pReflectionProbeRenderData->m_GlobalTransform.m_vPosition;
+    ezVec3 dirForwards = pReflectionProbeRenderData->m_GlobalTransform.m_qRotation * ezVec3(1.0f, 0.0, 0.0f);
+    ezVec3 dirUp = pReflectionProbeRenderData->m_GlobalTransform.m_qRotation * ezVec3(0.0f, 0.0, 1.0f);
+    ezVec3 scale = pReflectionProbeRenderData->m_GlobalTransform.m_vScale.CompMul(pReflectionProbeRenderData->m_vHalfExtents);
+
+    // the CompMax prevents division by zero (thus inf, thus NaN later, then crash)
+    // if negative scaling should be allowed, this would need to be changed
+    scale = ezVec3(1.0f).CompDiv(scale.CompMax(ezVec3(0.00001f)));
+
+    const ezMat4 lookAt = ezGraphicsUtils::CreateLookAtViewMatrix(position, position + dirForwards, dirUp);
+    ezMat4 scaleMat;
+    scaleMat.SetScalingMatrix(ezVec3(scale.y, -scale.z, scale.x));
+    perReflectionProbeData.worldToProbeMatrix = scaleMat * lookAt;
+
+
+    perReflectionProbeData.Index = pReflectionProbeRenderData->m_uiIndex;
+    perReflectionProbeData.ProbePosition = position.GetAsVec4(1.0f);
+  }
+
 
   EZ_FORCE_INLINE ezSimdBBox GetScreenSpaceBounds(const ezSimdBSphere& sphere, const ezSimdMat4f& viewMatrix, const ezSimdMat4f& projectionMatrix)
   {
@@ -363,10 +386,10 @@ namespace
   }
 
   template <typename Cluster>
-  void RasterizeDecal(const ezDecalRenderData* pDecalRenderData, ezUInt32 uiDecalIndex, const ezSimdMat4f& viewProjectionMatrix, Cluster* clusters,
+  void RasterizeDecal(const ezTransform& transform, ezUInt32 uiDecalIndex, const ezSimdMat4f& viewProjectionMatrix, Cluster* clusters,
     ezSimdBSphere* clusterBoundingSpheres)
   {
-    ezSimdMat4f decalToWorld = ezSimdConversion::ToTransform(pDecalRenderData->m_GlobalTransform).GetAsMat4();
+    ezSimdMat4f decalToWorld = ezSimdConversion::ToTransform(transform).GetAsMat4();
     ezSimdMat4f worldToDecal = decalToWorld.GetInverse();
 
     ezVec3 corners[8];

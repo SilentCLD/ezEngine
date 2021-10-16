@@ -40,6 +40,7 @@ EZ_STATICLINK_LIBRARY(RendererCore)
   EZ_STATICLINK_REFERENCE(RendererCore_Lights_Implementation_ReflectionProbeData);
   EZ_STATICLINK_REFERENCE(RendererCore_Lights_Implementation_ShadowPool);
   EZ_STATICLINK_REFERENCE(RendererCore_Lights_Implementation_SkyLightComponent);
+  EZ_STATICLINK_REFERENCE(RendererCore_Lights_Implementation_SphereReflectionProbeComponent);
   EZ_STATICLINK_REFERENCE(RendererCore_Lights_Implementation_SpotLightComponent);
   EZ_STATICLINK_REFERENCE(RendererCore_Material_Implementation_MaterialResource);
   EZ_STATICLINK_REFERENCE(RendererCore_Meshes_Implementation_CpuMeshResource);

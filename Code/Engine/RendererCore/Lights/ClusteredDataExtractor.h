@@ -5,6 +5,7 @@
 
 struct ezPerLightData;
 struct ezPerDecalData;
+struct ezPerReflectionProbeData;
 struct ezPerClusterData;
 
 class ezClusteredDataCPU : public ezRenderData
@@ -19,11 +20,13 @@ public:
   {
     MAX_LIGHT_DATA = 1024,
     MAX_DECAL_DATA = 1024,
+    MAX_REFLECTION_PROBE_DATA = 1024,
     MAX_ITEMS_PER_CLUSTER = 256
   };
 
   ezArrayPtr<ezPerLightData> m_LightData;
   ezArrayPtr<ezPerDecalData> m_DecalData;
+  ezArrayPtr<ezPerReflectionProbeData> m_ReflectionProbeData;
   ezArrayPtr<ezPerClusterData> m_ClusterData;
   ezArrayPtr<ezUInt32> m_ClusterItemList;
 
@@ -61,8 +64,10 @@ private:
 
   ezDynamicArray<ezPerLightData, ezAlignedAllocatorWrapper> m_TempLightData;
   ezDynamicArray<ezPerDecalData, ezAlignedAllocatorWrapper> m_TempDecalData;
+  ezDynamicArray<ezPerReflectionProbeData, ezAlignedAllocatorWrapper> m_TempReflectionProbeData;
   ezDynamicArray<TempCluster<ezClusteredDataCPU::MAX_LIGHT_DATA>> m_TempLightsClusters;
   ezDynamicArray<TempCluster<ezClusteredDataCPU::MAX_DECAL_DATA>> m_TempDecalsClusters;
+  ezDynamicArray<TempCluster<ezClusteredDataCPU::MAX_DECAL_DATA>> m_TempReflectionProbeClusters;
   ezDynamicArray<ezUInt32> m_TempClusterItemList;
 
   ezDynamicArray<ezSimdBSphere, ezAlignedAllocatorWrapper> m_ClusterBoundingSpheres;

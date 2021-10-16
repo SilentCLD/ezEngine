@@ -3,6 +3,8 @@
 #include <Core/World/SettingsComponent.h>
 #include <Core/World/SettingsComponentManager.h>
 #include <RendererCore/Lights/Implementation/ReflectionProbeData.h>
+#include <RendererCore/Textures/TextureCubeResource.h>
+#include <RendererCore/Lights/SphereReflectionProbeComponent.h>
 
 struct ezMsgUpdateLocalBounds;
 struct ezMsgExtractRenderData;
@@ -32,23 +34,41 @@ public:
   ezSkyLightComponent();
   ~ezSkyLightComponent();
 
+  void SetReflectionProbeMode(ezEnum<ezReflectionProbeMode> mode); // [ property ]
+  ezEnum<ezReflectionProbeMode> GetReflectionProbeMode() const;    // [ property ]
+
   void SetIntensity(float fIntensity); // [ property ]
   float GetIntensity() const;          // [ property ]
 
   void SetSaturation(float fSaturation); // [ property ]
   float GetSaturation() const;           // [ property ]
 
-  void SetReflectionProbeMode(ezEnum<ezReflectionProbeMode> mode); // [ property ]
-  ezEnum<ezReflectionProbeMode> GetReflectionProbeMode() const;    // [ property ]
+  const ezTagSet& GetIncludeTags() const;   // [ property ]
+  void InsertIncludeTag(const char* szTag); // [ property ]
+  void RemoveIncludeTag(const char* szTag); // [ property ]
+
+  const ezTagSet& GetExcludeTags() const;   // [ property ]
+  void InsertExcludeTag(const char* szTag); // [ property ]
+  void RemoveExcludeTag(const char* szTag); // [ property ]
+
+  void SetShowDebugInfo(bool bShowDebugInfo); // [ property ]
+  bool GetShowDebugInfo() const;              // [ property ]
 
   void SetCubeMapFile(const char* szFile); // [ property ]
   const char* GetCubeMapFile() const;      // [ property ]
+  ezTextureCubeResourceHandle GetCubeMap() const {
+    return m_hCubeMap;
+  }
 
 protected:
   void OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg);
   void OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const;
 
-  ezReflectionProbeData m_ReflectionProbeData;
+  ezReflectionProbeDesc m_desc;
+  ezTextureCubeResourceHandle m_hCubeMap;
+
+  ezReflectionProbeId m_Id;
+
   // Tracks if any changes where made to the settings. Reset ezReflectionPool::ExtractReflectionProbe once a filter pass is done.
   mutable bool m_bStatesDirty = true;
 };

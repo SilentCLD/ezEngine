@@ -8,9 +8,9 @@
 #include <RendererCore/Debug/DebugRenderer.h>
 #include <RendererCore/GPUResourcePool/GPUResourcePool.h>
 #include <RendererCore/Lights/Implementation/ReflectionPool.h>
+#include <RendererCore/Lights/Implementation/ReflectionPoolDeclarations.h>
 #include <RendererCore/Lights/Implementation/ReflectionProbeData.h>
 #include <RendererCore/Meshes/MeshComponentBase.h>
-#include <RendererCore/Pipeline/View.h>
 #include <RendererCore/RenderWorld/RenderWorld.h>
 #include <RendererCore/Textures/TextureCubeResource.h>
 #include <RendererFoundation/CommandEncoder/ComputeCommandEncoder.h>
@@ -44,77 +44,8 @@ EZ_END_SUBSYSTEM_DECLARATION;
 ezCVarInt cvar_RenderingReflectionPoolMaxRenderViews("Rendering.ReflectionPool.MaxRenderViews", 1, ezCVarFlags::Default, "The maximum number of render views for reflection probes each frame");
 ezCVarInt cvar_RenderingReflectionPoolMaxFilterViews("Rendering.ReflectionPool.MaxFilterViews", 1, ezCVarFlags::Default, "The maximum number of filter views for reflection probes each frame");
 
-static ezUInt32 s_uiReflectionCubeMapSize = 128;
-static ezUInt32 s_uiNumReflectionProbeCubeMaps = 32;
-static float s_fDebugSphereRadius = 0.3f;
-
-ezUInt32 GetMipLevels()
-{
-  return ezMath::Log2i(s_uiReflectionCubeMapSize) - 1; // only down to 4x4
-}
-
-struct ReflectionView
-{
-  ezViewHandle m_hView;
-  ezCamera m_Camera;
-};
-
-struct UpdateStep
-{
-  typedef ezUInt8 StorageType;
-
-  enum Enum
-  {
-    RenderFace0,
-    RenderFace1,
-    RenderFace2,
-    RenderFace3,
-    RenderFace4,
-    RenderFace5,
-    Filter,
-
-    ENUM_COUNT,
-
-    Default = Filter
-  };
-
-  static bool IsRenderStep(Enum value) { return value >= UpdateStep::RenderFace0 && value <= UpdateStep::RenderFace5; }
-  static Enum NextStep(Enum value) { return static_cast<UpdateStep::Enum>((value + 1) % UpdateStep::ENUM_COUNT); }
-};
-
 //////////////////////////////////////////////////////////////////////////
 /// ProbeUpdateInfo
-
-struct ProbeUpdateInfo
-{
-  ProbeUpdateInfo();
-  ProbeUpdateInfo(ProbeUpdateInfo&& other);
-  ~ProbeUpdateInfo();
-
-  void operator=(ProbeUpdateInfo&& other);
-  float GetPriority(ezUInt64 uiCurrentFrame) const;
-
-  struct Step
-  {
-    EZ_DECLARE_POD_TYPE();
-
-    ezUInt8 m_uiViewIndex;
-    ezEnum<UpdateStep> m_UpdateStep;
-  };
-
-  ezUInt64 m_uiLastActiveFrame = -1;
-  ezUInt64 m_uiLastUpdatedFrame = -1;
-  ezWorld* m_pWorld = nullptr;
-  float m_fPriority = 0.0f;
-  ezEnum<ezReflectionProbeMode> m_Mode;
-  ezUInt32 m_uiIndexInUpdateQueue = 0;
-  ezEnum<UpdateStep> m_LastUpdateStep;
-
-  ezHybridArray<Step, 8> m_UpdateSteps;
-
-  ezGALTextureHandle m_hCubemap;
-  ezGALTextureHandle m_hCubemapProxies[6];
-};
 
 ProbeUpdateInfo::ProbeUpdateInfo()
 {
@@ -146,11 +77,6 @@ ProbeUpdateInfo::ProbeUpdateInfo()
   }
 }
 
-ProbeUpdateInfo::ProbeUpdateInfo(ProbeUpdateInfo&& other)
-{
-  *this = std::move(other);
-}
-
 ProbeUpdateInfo::~ProbeUpdateInfo()
 {
   for (ezUInt32 i = 0; i < EZ_ARRAY_SIZE(m_hCubemapProxies); ++i)
@@ -167,108 +93,25 @@ ProbeUpdateInfo::~ProbeUpdateInfo()
   }
 }
 
-void ProbeUpdateInfo::operator=(ProbeUpdateInfo&& other)
+void ProbeUpdateInfo::Reset()
 {
-  m_uiLastActiveFrame = other.m_uiLastActiveFrame;
-  m_uiLastUpdatedFrame = other.m_uiLastUpdatedFrame;
-  m_pWorld = other.m_pWorld;
-  m_fPriority = other.m_fPriority;
-  m_Mode = other.m_Mode;
-  m_uiIndexInUpdateQueue = other.m_uiIndexInUpdateQueue;
-  m_LastUpdateStep = other.m_LastUpdateStep;
-  m_UpdateSteps = std::move(other.m_UpdateSteps);
-
-  m_hCubemap = other.m_hCubemap;
-  other.m_hCubemap.Invalidate();
-
-  for (ezUInt32 i = 0; i < EZ_ARRAY_SIZE(m_hCubemapProxies); ++i)
-  {
-    m_hCubemapProxies[i] = other.m_hCubemapProxies[i];
-    other.m_hCubemapProxies[i].Invalidate();
-  }
+  m_bInUse = false;
+  m_UpdateTarget.m_Id.Invalidate();
+  m_UpdateTarget.m_uiWorldIndex = 0;
+  m_LastUpdateStep = UpdateStep::Default;
+  m_UpdateSteps.Clear();
 }
 
-float ProbeUpdateInfo::GetPriority(ezUInt64 uiCurrentFrame) const
+void ProbeUpdateInfo::Setup(DynamicUpdate target)
 {
-  ezUInt32 uiFramesSinceLastUpdate = m_uiLastUpdatedFrame < uiCurrentFrame ? ezUInt32(uiCurrentFrame - m_uiLastUpdatedFrame) : 10000;
-  return uiFramesSinceLastUpdate * m_fPriority;
+  m_UpdateTarget = target;
+  m_bInUse = true;
+  m_Mode = ezReflectionProbeMode::Dynamic;
+  //#TODO other stuff.
 }
-
-//////////////////////////////////////////////////////////////////////////
-/// SortedUpdateInfo
-
-struct SortedUpdateInfo
-{
-  EZ_DECLARE_POD_TYPE();
-
-  EZ_ALWAYS_INLINE bool operator<(const SortedUpdateInfo& other) const
-  {
-    if (m_fPriority > other.m_fPriority) // we want to sort descending (higher priority first)
-      return true;
-
-    return m_uiIndex < other.m_uiIndex;
-  }
-
-  ProbeUpdateInfo* m_pUpdateInfo = nullptr;
-  ezUInt32 m_uiIndex = 0;
-  float m_fPriority = 0.0f;
-};
-
-// must not be in anonymous namespace
-template <>
-struct ezHashHelper<ezReflectionProbeId>
-{
-  EZ_ALWAYS_INLINE static ezUInt32 Hash(ezReflectionProbeId value) { return ezHashHelper<ezUInt32>::Hash(value.m_Data); }
-
-  EZ_ALWAYS_INLINE static bool Equal(ezReflectionProbeId a, ezReflectionProbeId b) { return a == b; }
-};
 
 //////////////////////////////////////////////////////////////////////////
 /// ezReflectionPool::Data
-
-struct ezReflectionPool::Data
-{
-  Data();
-  ~Data();
-
-  struct WorldReflectionData
-  {
-    ezGALTextureHandle m_hReflectionSpecularTexture;
-    ezUInt32 m_uiRegisteredProbeCount = 0;
-  };
-
-  void SortActiveProbes(ezUInt64 uiFrameCounter);
-  void GenerateUpdateSteps();
-  void CreateWorldReflectionData(ezReflectionPool::Data::WorldReflectionData& data);
-  void DestroyWorldReflectionData(ezReflectionPool::Data::WorldReflectionData& data);
-  void CreateReflectionViewsAndResources();
-  void CreateSkyIrradianceTexture();
-  void AddViewToRender(const ProbeUpdateInfo::Step& step, const ezReflectionProbeData& data, ProbeUpdateInfo& updateInfo, const ezVec3& vPosition);
-
-  ezDynamicArray<ReflectionView> m_RenderViews;
-  ezDynamicArray<ReflectionView> m_FilterViews;
-
-  // Registered dynamic probes
-  ezMutex m_Mutex;
-  ezIdTable<ezReflectionProbeId, ProbeUpdateInfo> m_UpdateInfo;
-  ezUInt64 m_uiWorldHasSkyLight = 0;
-  ezUInt64 m_uiSkyIrradianceChanged = 0;
-
-  // Active dynamic probes (just registered or called ExtractReflectionProbe last frame)
-  ezDynamicArray<ezReflectionProbeId> m_ActiveDynamicProbes;
-
-  ezDynamicArray<SortedUpdateInfo> m_SortedUpdateInfo;
-
-  // GPU storage
-  ezHybridArray<WorldReflectionData, 64> m_hReflectionSpecularTexture;
-  ezGALTextureHandle m_hFallbackReflectionSpecularTexture;
-  ezGALTextureHandle m_hSkyIrradianceTexture;
-  ezHybridArray<ezAmbientCube<ezColorLinear16f>, 64> m_SkyIrradianceStorage;
-
-  // Debug data
-  ezMeshResourceHandle m_hDebugSphere;
-  ezHybridArray<ezMaterialResourceHandle, 6> m_hDebugMaterial;
-};
 
 ezReflectionPool::Data::Data()
 {
@@ -308,29 +151,29 @@ ezReflectionPool::Data::~Data()
   }
 }
 
-void ezReflectionPool::Data::SortActiveProbes(ezUInt64 uiFrameCounter)
-{
-  m_SortedUpdateInfo.Clear();
-
-  for (ezUInt32 uiActiveProbeIndex = 0; uiActiveProbeIndex < m_ActiveDynamicProbes.GetCount(); ++uiActiveProbeIndex)
-  {
-    ProbeUpdateInfo* pUpdateInfo = nullptr;
-    if (m_UpdateInfo.TryGetValue(m_ActiveDynamicProbes[uiActiveProbeIndex], pUpdateInfo))
-    {
-      auto& sorted = m_SortedUpdateInfo.ExpandAndGetRef();
-      sorted.m_pUpdateInfo = pUpdateInfo;
-      sorted.m_uiIndex = uiActiveProbeIndex;
-      sorted.m_fPriority = pUpdateInfo->GetPriority(uiFrameCounter);
-    }
-  }
-
-  m_SortedUpdateInfo.Sort();
-
-  for (ezUInt32 i = 0; i < m_SortedUpdateInfo.GetCount(); ++i)
-  {
-    m_SortedUpdateInfo[i].m_pUpdateInfo->m_uiIndexInUpdateQueue = i;
-  }
-}
+//void ezReflectionPool::Data::SortActiveProbes(ezUInt64 uiFrameCounter)
+//{
+//  m_SortedUpdateInfo.Clear();
+//
+//  for (ezUInt32 uiActiveProbeIndex = 0; uiActiveProbeIndex < m_ActiveDynamicProbes.GetCount(); ++uiActiveProbeIndex)
+//  {
+//    ProbeUpdateInfo* pUpdateInfo = nullptr;
+//    if (m_UpdateInfo.TryGetValue(m_ActiveDynamicProbes[uiActiveProbeIndex], pUpdateInfo))
+//    {
+//      auto& sorted = m_SortedUpdateInfo.ExpandAndGetRef();
+//      sorted.m_pUpdateInfo = pUpdateInfo;
+//      sorted.m_uiIndex = uiActiveProbeIndex;
+//      sorted.m_fPriority = pUpdateInfo->GetPriority(uiFrameCounter);
+//    }
+//  }
+//
+//  m_SortedUpdateInfo.Sort();
+//
+//  for (ezUInt32 i = 0; i < m_SortedUpdateInfo.GetCount(); ++i)
+//  {
+//    m_SortedUpdateInfo[i].m_pUpdateInfo->m_uiIndexInUpdateQueue = i;
+//  }
+//}
 
 void ezReflectionPool::Data::GenerateUpdateSteps()
 {
@@ -338,10 +181,14 @@ void ezReflectionPool::Data::GenerateUpdateSteps()
   ezUInt32 uiFilterViewIndex = 0;
 
   ezUInt32 uiSortedUpdateInfoIndex = 0;
-  while (uiSortedUpdateInfoIndex < m_SortedUpdateInfo.GetCount())
+  while (uiSortedUpdateInfoIndex < m_DynamicUpdates.GetCount())
   {
-    const auto& sortedUpdateInfo = m_SortedUpdateInfo[uiSortedUpdateInfoIndex];
-    auto pUpdateInfo = sortedUpdateInfo.m_pUpdateInfo;
+    auto pUpdateInfo = &m_DynamicUpdates[uiSortedUpdateInfoIndex];
+    if (!pUpdateInfo->m_bInUse)
+    {
+      ++uiSortedUpdateInfoIndex;
+      continue;
+    }
 
     auto& updateSteps = pUpdateInfo->m_UpdateSteps;
     UpdateStep::Enum nextStep = UpdateStep::NextStep(updateSteps.IsEmpty() ? pUpdateInfo->m_LastUpdateStep : updateSteps.PeekBack().m_UpdateStep);
@@ -379,11 +226,11 @@ void ezReflectionPool::Data::GenerateUpdateSteps()
       break;
     }
 
-    // advance to next probe if it has the same priority as the current probe
-    if (uiSortedUpdateInfoIndex + 1 < s_pData->m_SortedUpdateInfo.GetCount())
-    {
-      bNextProbe |= s_pData->m_SortedUpdateInfo[uiSortedUpdateInfoIndex + 1].m_fPriority == sortedUpdateInfo.m_fPriority;
-    }
+    //// advance to next probe if it has the same priority as the current probe
+    //if (uiSortedUpdateInfoIndex + 1 < s_pData->m_SortedUpdateInfo.GetCount())
+    //{
+    //  bNextProbe |= s_pData->m_SortedUpdateInfo[uiSortedUpdateInfoIndex + 1].m_fPriority == sortedUpdateInfo.m_fPriority;
+    //}
 
     if (bNextProbe)
     {
@@ -460,6 +307,11 @@ void ezReflectionPool::Data::CreateReflectionViewsAndResources()
   // ReflectionFilterPipeline.ezRenderPipelineAsset
   CreateViews(m_FilterViews, cvar_RenderingReflectionPoolMaxFilterViews, "Filter", "{ 3437db17-ddf1-4b67-b80f-9999d6b0c352 }");
 
+  if (m_DynamicUpdates.IsEmpty())
+  {
+    m_DynamicUpdates.SetCount(2);
+  }
+
   if (m_hFallbackReflectionSpecularTexture.IsInvalidated())
   {
     ezGALDevice* pDevice = ezGALDevice::GetDefaultDevice();
@@ -520,32 +372,39 @@ void ezReflectionPool::Data::CreateReflectionViewsAndResources()
     if (pMaterial->GetLoadingState() != ezResourceState::Loaded)
       return;
 
-
     ezMaterialResourceDescriptor desc = pMaterial->GetCurrentDesc();
-    ezUInt32 uiParamIndex = desc.m_Parameters.GetCount();
-    ezTempHashedString sParamName = "MipLevel";
+    ezUInt32 uiMipLevel = desc.m_Parameters.GetCount();
+    ezUInt32 uiReflectionProbeIndex = desc.m_Parameters.GetCount();
+    ezTempHashedString sMipLevelParam = "MipLevel";
+    ezTempHashedString sReflectionProbeIndexParam = "ReflectionProbeIndex";
     for (ezUInt32 i = 0; i < desc.m_Parameters.GetCount(); ++i)
     {
-      if (desc.m_Parameters[i].m_Name == sParamName)
+      if (desc.m_Parameters[i].m_Name == sMipLevelParam)
       {
-        uiParamIndex = i;
-        break;
+        uiMipLevel = i;
+      }
+      if (desc.m_Parameters[i].m_Name == sReflectionProbeIndexParam)
+      {
+        uiReflectionProbeIndex = i;
       }
     }
 
-    if (uiParamIndex >= desc.m_Parameters.GetCount())
+    if (uiMipLevel >= desc.m_Parameters.GetCount() || uiReflectionProbeIndex >= desc.m_Parameters.GetCount())
       return;
 
-    m_hDebugMaterial.SetCount(uiMipLevelCount);
-    m_hDebugMaterial[0] = hDebugMaterial;
-    for (ezUInt32 i = 1; i < uiMipLevelCount; i++)
+    m_hDebugMaterial.SetCount(uiMipLevelCount * s_uiNumReflectionProbeCubeMaps);
+    for (ezUInt32 iReflectionProbeIndex = 0; iReflectionProbeIndex < s_uiNumReflectionProbeCubeMaps; iReflectionProbeIndex++)
     {
-      desc.m_Parameters[uiParamIndex].m_Value = i;
-      ezStringBuilder sMaterialName;
-      sMaterialName.Format("ReflectionProbeVisualization - MipLevel {}", i);
+      for (ezUInt32 iMipLevel = 0; iMipLevel < uiMipLevelCount; iMipLevel++)
+      {
+        desc.m_Parameters[uiMipLevel].m_Value = iMipLevel;
+        desc.m_Parameters[uiReflectionProbeIndex].m_Value = iReflectionProbeIndex;
+        ezStringBuilder sMaterialName;
+        sMaterialName.Format("ReflectionProbeVisualization - MipLevel {}, Index {}", iMipLevel, iReflectionProbeIndex);
 
-      ezMaterialResourceDescriptor desc2 = desc;
-      m_hDebugMaterial[i] = ezResourceManager::CreateResource<ezMaterialResource>(sMaterialName, std::move(desc2));
+        ezMaterialResourceDescriptor desc2 = desc;
+        m_hDebugMaterial[iReflectionProbeIndex * uiMipLevelCount + iMipLevel] = ezResourceManager::CreateResource<ezMaterialResource>(sMaterialName, std::move(desc2));
+      }
     }
   }
 #endif
@@ -570,7 +429,7 @@ void ezReflectionPool::Data::CreateSkyIrradianceTexture()
   }
 }
 
-void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, const ezReflectionProbeData& data, ProbeUpdateInfo& updateInfo, const ezVec3& vPosition)
+void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, const ProbeData& probeData, ProbeUpdateInfo& updateInfo, const ezTransform& transform)
 {
   ezVec3 vForward[6] = {
     ezVec3(1.0f, 0.0f, 0.0f),
@@ -607,40 +466,63 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
       uiFaceIndex = step.m_UpdateStep;
     }
 
+    ezVec3 vScale = vForward[uiFaceIndex].CompMul(transform.m_vScale);
+
     ezView* pView = nullptr;
     ezRenderWorld::TryGetView(pReflectionView->m_hView, pView);
 
-    pView->m_IncludeTags = data.m_IncludeTags;
-    pView->m_ExcludeTags = data.m_ExcludeTags;
-    pView->SetWorld(updateInfo.m_pWorld);
+    pView->m_IncludeTags = probeData.m_desc.m_IncludeTags;
+    pView->m_ExcludeTags = probeData.m_desc.m_ExcludeTags;
+    ezWorld* pWorld = ezWorld::GetWorld(updateInfo.m_UpdateTarget.m_uiWorldIndex);
+    pView->SetWorld(pWorld);
 
     ezGALRenderTargetSetup renderTargetSetup;
     if (step.m_UpdateStep == UpdateStep::Filter)
     {
-      const ezUInt32 uiWorldIndex = updateInfo.m_pWorld->GetIndex();
+      const ezUInt32 uiWorldIndex = pWorld->GetIndex();
       renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(m_hReflectionSpecularTexture[uiWorldIndex].m_hReflectionSpecularTexture));
-      renderTargetSetup.SetRenderTarget(2, pDevice->GetDefaultRenderTargetView(m_hSkyIrradianceTexture));
-
-      pView->SetRenderPassProperty("ReflectionFilterPass", "Intensity", data.m_fIntensity);
-      pView->SetRenderPassProperty("ReflectionFilterPass", "Saturation", data.m_fSaturation);
-      pView->SetRenderPassProperty("ReflectionFilterPass", "SpecularOutputIndex", 0);
-      pView->SetRenderPassProperty("ReflectionFilterPass", "IrradianceOutputIndex", updateInfo.m_pWorld->GetIndex());
-      ezGALTextureHandle hSourceTexture = updateInfo.m_hCubemap;
-      if (data.m_Mode == ezReflectionProbeMode::Static)
+      if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
       {
-        ezResourceLock<ezTextureCubeResource> pTexture(data.m_hCubeMap, ezResourceAcquireMode::BlockTillLoaded);
+        renderTargetSetup.SetRenderTarget(2, pDevice->GetDefaultRenderTargetView(m_hSkyIrradianceTexture));
+      }
+      pView->SetRenderPassProperty("ReflectionFilterPass", "Intensity", probeData.m_desc.m_fIntensity);
+      pView->SetRenderPassProperty("ReflectionFilterPass", "Saturation", probeData.m_desc.m_fSaturation);
+      pView->SetRenderPassProperty("ReflectionFilterPass", "SpecularOutputIndex", probeData.m_uiReflectionIndex);
+      pView->SetRenderPassProperty("ReflectionFilterPass", "IrradianceOutputIndex", pWorld->GetIndex());
+      ezGALTextureHandle hSourceTexture = updateInfo.m_hCubemap;
+      if (probeData.m_desc.m_Mode == ezReflectionProbeMode::Static)
+      {
+        ezResourceLock<ezTextureCubeResource> pTexture(probeData.m_hCubeMap, ezResourceAcquireMode::BlockTillLoaded);
         hSourceTexture = pTexture->GetGALTexture();
       }
       pView->SetRenderPassProperty("ReflectionFilterPass", "InputCubemap", hSourceTexture.GetInternalID().m_Data);
     }
     else
     {
+      if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
+      {
+        vScale *= 100;
+      }
+      else if (probeData.m_Flags.IsSet(ezProbeFlags::Sphere))
+      {
+        vScale = vScale.CompMul(probeData.m_vHalfExtents);
+      }
+      else if (probeData.m_Flags.IsSet(ezProbeFlags::Box))
+      {
+        vScale = vScale.CompMul(probeData.m_vHalfExtents);
+      }
       renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(updateInfo.m_hCubemapProxies[uiFaceIndex]));
     }
     pView->SetRenderTargetSetup(renderTargetSetup);
 
-    pReflectionView->m_Camera.LookAt(vPosition, vPosition + vForward[uiFaceIndex], vUp[uiFaceIndex]);
+    ezVec3 vPosition = transform.m_vPosition;
+    ezVec3 vForward2 = transform.TransformDirection(vForward[uiFaceIndex]);
+    ezVec3 vUp2 = transform.TransformDirection(vUp[uiFaceIndex]);
 
+    const float fFar = ezMath::Max(0.01f, ezMath::Abs(vScale.x) + ezMath::Abs(vScale.y) + ezMath::Abs(vScale.z)); // Only one component is actually set due to multiplying with vForward.
+    const float fNear = (0.1f >= fFar) ? fFar / 2.0f : 0.1f;
+    pReflectionView->m_Camera.LookAt(vPosition, vPosition + vForward2, vUp2);
+    pReflectionView->m_Camera.SetCameraMode(ezCameraMode::PerspectiveFixedFovX, 90.0f, fNear, fFar);
     ezRenderWorld::AddViewToRender(pReflectionView->m_hView);
   }
 }
@@ -650,158 +532,82 @@ ezReflectionPool::Data* ezReflectionPool::s_pData;
 //////////////////////////////////////////////////////////////////////////
 /// ezReflectionPool
 
-// static
-void ezReflectionPool::RegisterReflectionProbe(ezReflectionProbeData& data, ezWorld* pWorld, float fPriority)
-{
-  ProbeUpdateInfo updateInfo;
-  updateInfo.m_pWorld = pWorld;
-  updateInfo.m_fPriority = ezMath::Clamp(fPriority, ezMath::DefaultEpsilon<float>(), 100.0f);
-  updateInfo.m_Mode = data.m_Mode;
 
-  EZ_LOCK(s_pData->m_Mutex);
-
-  data.m_Id = s_pData->m_UpdateInfo.Insert(std::move(updateInfo));
-
-  s_pData->m_ActiveDynamicProbes.PushBack(data.m_Id);
-
-  const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-  s_pData->m_uiWorldHasSkyLight |= EZ_BIT(uiWorldIndex);
-  s_pData->m_uiSkyIrradianceChanged |= EZ_BIT(uiWorldIndex);
-
-  if (uiWorldIndex >= s_pData->m_hReflectionSpecularTexture.GetCount())
-    s_pData->m_hReflectionSpecularTexture.SetCount(uiWorldIndex + 1);
-
-  ezReflectionPool::Data::WorldReflectionData& worldReflectionData = s_pData->m_hReflectionSpecularTexture[uiWorldIndex];
-  if (worldReflectionData.m_uiRegisteredProbeCount == 0)
-  {
-    s_pData->CreateWorldReflectionData(worldReflectionData);
-  }
-  worldReflectionData.m_uiRegisteredProbeCount++;
-}
-
-void ezReflectionPool::DeregisterReflectionProbe(ezReflectionProbeData& data, ezWorld* pWorld)
-{
-  EZ_LOCK(s_pData->m_Mutex);
-
-  s_pData->m_UpdateInfo.Remove(data.m_Id);
-  data.m_Id.Invalidate();
-
-  const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-  s_pData->m_uiWorldHasSkyLight &= ~EZ_BIT(uiWorldIndex);
-  s_pData->m_uiSkyIrradianceChanged |= EZ_BIT(uiWorldIndex);
-
-  ezReflectionPool::Data::WorldReflectionData& worldReflectionData = s_pData->m_hReflectionSpecularTexture[uiWorldIndex];
-  worldReflectionData.m_uiRegisteredProbeCount--;
-  if (worldReflectionData.m_uiRegisteredProbeCount == 0)
-  {
-    s_pData->DestroyWorldReflectionData(worldReflectionData);
-  }
-}
-
-// static
-void ezReflectionPool::ExtractReflectionProbe(
-  ezMsgExtractRenderData& msg, const ezReflectionProbeData& data, const ezComponent* pComponent, bool& bStatesDirty, float fPriority /*= 1.0f*/)
-{
-  fPriority = ezMath::Clamp(fPriority, ezMath::DefaultEpsilon<float>(), 100.0f);
-  ezVec3 vPosition = pComponent->GetOwner()->GetGlobalPosition();
-
-  ProbeUpdateInfo* pUpdateInfo = nullptr;
-  if (!s_pData->m_UpdateInfo.TryGetValue(data.m_Id, pUpdateInfo))
-    return;
-
-  ezUInt64 uiCurrentFrame = ezRenderWorld::GetFrameCounter();
-  bool bExecuteUpdateSteps = false;
-
-  {
-    EZ_LOCK(s_pData->m_Mutex);
-
-    pUpdateInfo->m_fPriority = ezMath::Max(pUpdateInfo->m_fPriority, fPriority);
-
-    bool bFirstTimeCalledThisFrame = false;
-    if (pUpdateInfo->m_uiLastActiveFrame != uiCurrentFrame)
-    {
-      pUpdateInfo->m_uiLastActiveFrame = uiCurrentFrame;
-      bExecuteUpdateSteps = !pUpdateInfo->m_UpdateSteps.IsEmpty();
-      // This function can be called multiple times per frame (once per view) but execution is only run once.
-      bFirstTimeCalledThisFrame = true;
-    }
-
-    if (pUpdateInfo->m_Mode != data.m_Mode)
-    {
-      // If the mode changes we restart the cycle by setting the last update step to filter, which is the last step in the cycle.
-      pUpdateInfo->m_Mode = data.m_Mode;
-      // Clear current step and don't execute it as it probably no longer makes sense to run it.
-      bExecuteUpdateSteps = false;
-      pUpdateInfo->m_LastUpdateStep = UpdateStep::Filter;
-      pUpdateInfo->m_UpdateSteps.Clear();
-    }
-
-    if (bFirstTimeCalledThisFrame)
-    {
-      // Add as active for next frame if states have changed and we are not
-      if (pUpdateInfo->m_Mode == ezReflectionProbeMode::Dynamic || bStatesDirty && !bExecuteUpdateSteps)
-        s_pData->m_ActiveDynamicProbes.PushBack(data.m_Id);
-
-      if (pUpdateInfo->m_Mode == ezReflectionProbeMode::Static)
-      {
-        // Wait until the input texture is fully loaded.
-        ezResourceLock<ezTextureCubeResource> pTexture(data.m_hCubeMap, ezResourceAcquireMode::AllowLoadingFallback);
-        if (pTexture->GetLoadingState() != ezResourceState::Loaded || pTexture->GetNumQualityLevelsLoadable() > 0 || pTexture->GetResourceHandle() != data.m_hCubeMap)
-        {
-          bExecuteUpdateSteps = false;
-        }
-      }
-    }
-  }
-
-  if (bExecuteUpdateSteps)
-  {
-    bool bFiltered = false;
-    for (ezUInt32 i = pUpdateInfo->m_UpdateSteps.GetCount(); i-- > 0;)
-    {
-      if (pUpdateInfo->m_UpdateSteps[i].m_UpdateStep == UpdateStep::Filter)
-        bStatesDirty = false;
-      s_pData->AddViewToRender(pUpdateInfo->m_UpdateSteps[i], data, *pUpdateInfo, vPosition);
-    }
-
-    pUpdateInfo->m_LastUpdateStep = pUpdateInfo->m_UpdateSteps.PeekBack().m_UpdateStep;
-    pUpdateInfo->m_UpdateSteps.Clear();
-
-    pUpdateInfo->m_uiLastUpdatedFrame = uiCurrentFrame;
-  }
-
-#if EZ_ENABLED(EZ_COMPILE_FOR_DEVELOPMENT)
-  ezUInt32 uiMipLevels = GetMipLevels();
-  if (data.m_bShowDebugInfo && s_pData->m_hDebugMaterial.GetCount() == uiMipLevels)
-  {
-    const ezGameObject* pOwner = pComponent->GetOwner();
-
-    for (ezUInt32 i = 0; i < uiMipLevels; i++)
-    {
-      ezMeshRenderData* pRenderData = ezCreateRenderDataForThisFrame<ezMeshRenderData>(pOwner);
-      pRenderData->m_GlobalTransform = pOwner->GetGlobalTransform();
-      pRenderData->m_GlobalTransform.m_vPosition.z += s_fDebugSphereRadius * i * 2;
-      pRenderData->m_GlobalBounds = pOwner->GetGlobalBounds();
-      pRenderData->m_hMesh = s_pData->m_hDebugSphere;
-      pRenderData->m_hMaterial = s_pData->m_hDebugMaterial[i];
-      pRenderData->m_Color = ezColor::White;
-      pRenderData->m_uiSubMeshIndex = 0;
-      pRenderData->m_uiUniqueID = ezRenderComponent::GetUniqueIdForRendering(pComponent, 0);
-
-      pRenderData->FillBatchIdAndSortingKey();
-      msg.AddRenderData(pRenderData, ezDefaultRenderDataCategories::LitOpaque, ezRenderData::Caching::IfStatic);
-    }
-
-    if (msg.m_OverrideCategory == ezInvalidRenderDataCategory)
-    {
-      ezStringBuilder sTemp;
-      sTemp.Format("Priority: {}\\nIndex in Update Queue: {}", pUpdateInfo->m_fPriority, pUpdateInfo->m_uiIndexInUpdateQueue);
-
-      ezDebugRenderer::Draw3DText(msg.m_pView->GetHandle(), sTemp, vPosition + ezVec3(0, 0, s_fDebugSphereRadius), ezColor::LightPink);
-    }
-  }
-#endif
-}
+//
+//// static
+//void ezReflectionPool::ExtractReflectionProbe(
+//  ezMsgExtractRenderData& msg, const ezReflectionProbeData& data, const ezComponent* pComponent, bool& bStatesDirty, float fPriority /*= 1.0f*/)
+//{
+//  fPriority = ezMath::Clamp(fPriority, ezMath::DefaultEpsilon<float>(), 100.0f);
+//  ezVec3 vPosition = pComponent->GetOwner()->GetGlobalPosition();
+//
+//  ProbeUpdateInfo* pUpdateInfo = nullptr;
+//  if (!s_pData->m_UpdateInfo.TryGetValue(data.m_Id, pUpdateInfo))
+//    return;
+//
+//  ezUInt64 uiCurrentFrame = ezRenderWorld::GetFrameCounter();
+//  bool bExecuteUpdateSteps = false;
+//
+//  {
+//    EZ_LOCK(s_pData->m_Mutex);
+//
+//    pUpdateInfo->m_fPriority = ezMath::Max(pUpdateInfo->m_fPriority, fPriority);
+//
+//    bool bFirstTimeCalledThisFrame = false;
+//    if (pUpdateInfo->m_uiLastActiveFrame != uiCurrentFrame)
+//    {
+//      pUpdateInfo->m_uiLastActiveFrame = uiCurrentFrame;
+//      bExecuteUpdateSteps = !pUpdateInfo->m_UpdateSteps.IsEmpty();
+//      // This function can be called multiple times per frame (once per view) but execution is only run once.
+//      bFirstTimeCalledThisFrame = true;
+//    }
+//
+//    if (pUpdateInfo->m_Mode != data.m_Mode)
+//    {
+//      // If the mode changes we restart the cycle by setting the last update step to filter, which is the last step in the cycle.
+//      pUpdateInfo->m_Mode = data.m_Mode;
+//      // Clear current step and don't execute it as it probably no longer makes sense to run it.
+//      bExecuteUpdateSteps = false;
+//      pUpdateInfo->m_LastUpdateStep = UpdateStep::Filter;
+//      pUpdateInfo->m_UpdateSteps.Clear();
+//    }
+//
+//    if (bFirstTimeCalledThisFrame)
+//    {
+//      // Add as active for next frame if states have changed and we are not
+//      if (pUpdateInfo->m_Mode == ezReflectionProbeMode::Dynamic || bStatesDirty && !bExecuteUpdateSteps)
+//        s_pData->m_ActiveDynamicProbes.PushBack(data.m_Id);
+//
+//      if (pUpdateInfo->m_Mode == ezReflectionProbeMode::Static)
+//      {
+//        // Wait until the input texture is fully loaded.
+//        ezResourceLock<ezTextureCubeResource> pTexture(data.m_hCubeMap, ezResourceAcquireMode::AllowLoadingFallback);
+//        if (pTexture->GetLoadingState() != ezResourceState::Loaded || pTexture->GetNumQualityLevelsLoadable() > 0 || pTexture->GetResourceHandle() != data.m_hCubeMap)
+//        {
+//          bExecuteUpdateSteps = false;
+//        }
+//      }
+//    }
+//  }
+//
+//  if (bExecuteUpdateSteps)
+//  {
+//    bool bFiltered = false;
+//    for (ezUInt32 i = pUpdateInfo->m_UpdateSteps.GetCount(); i-- > 0;)
+//    {
+//      if (pUpdateInfo->m_UpdateSteps[i].m_UpdateStep == UpdateStep::Filter)
+//        bStatesDirty = false;
+//      s_pData->AddViewToRender(pUpdateInfo->m_UpdateSteps[i], data, *pUpdateInfo, vPosition);
+//    }
+//
+//    pUpdateInfo->m_LastUpdateStep = pUpdateInfo->m_UpdateSteps.PeekBack().m_UpdateStep;
+//    pUpdateInfo->m_UpdateSteps.Clear();
+//
+//    pUpdateInfo->m_uiLastUpdatedFrame = uiCurrentFrame;
+//  }
+//
+//
+//}
 
 // static
 void ezReflectionPool::SetConstantSkyIrradiance(const ezWorld* pWorld, const ezAmbientCube<ezColor>& skyIrradiance)
@@ -875,27 +681,19 @@ void ezReflectionPool::OnEngineShutdown()
 // static
 void ezReflectionPool::OnExtractionEvent(const ezRenderWorldExtractionEvent& e)
 {
-  if (e.m_Type != ezRenderWorldExtractionEvent::Type::BeginExtraction)
-    return;
-
-  EZ_PROFILE_SCOPE("Reflection Pool Update");
-
-  s_pData->CreateSkyIrradianceTexture();
-
-  if (s_pData->m_ActiveDynamicProbes.IsEmpty())
+  if (e.m_Type == ezRenderWorldExtractionEvent::Type::BeginExtraction)
   {
-    return;
+    EZ_PROFILE_SCOPE("Reflection Pool BeginExtraction");
+    s_pData->CreateSkyIrradianceTexture();
+    s_pData->CreateReflectionViewsAndResources();
+    s_pData->PreExtraction();
+    s_pData->GenerateUpdateSteps();
   }
 
-  s_pData->CreateReflectionViewsAndResources();
-
-  // generate possible update steps for active probes
+  if (e.m_Type == ezRenderWorldExtractionEvent::Type::EndExtraction)
   {
-    s_pData->SortActiveProbes(e.m_uiFrameCounter);
-
-    s_pData->GenerateUpdateSteps();
-
-    s_pData->m_ActiveDynamicProbes.Clear();
+    EZ_PROFILE_SCOPE("Reflection Pool EndExtraction");
+    s_pData->PostExtraction();
   }
 }
 

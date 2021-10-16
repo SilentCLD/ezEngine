@@ -292,6 +292,102 @@ float CalculateShadowTerm(ezMaterialData matData, float3 lightVector, float dist
   return 1.0f;
 }
 
+
+
+float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerClusterData clusterData)
+{
+  uint firstItemIndex = clusterData.offset;
+  uint lastItemIndex = firstItemIndex + GET_PROBE_INDEX(clusterData.counts);
+
+  float aa = (lastItemIndex - firstItemIndex);
+  //return float3(aa, aa, aa);
+  float3 ref = float3(0, 0, 0);
+  [loop]
+  for (uint i = firstItemIndex; i < lastItemIndex; ++i)
+  {
+    uint itemIndex = clusterItemBuffer[i];
+    uint probeIndex = GET_PROBE_INDEX(itemIndex);
+
+    ezPerReflectionProbeData probeData = perPerReflectionProbeDataBuffer[probeIndex];
+
+    float4x4 worldToProbeMatrix = TransformToMatrix(probeData.worldToProbeMatrix);
+    float3x3 WorldToLocal = TransformToRotation(probeData.worldToProbeMatrix);
+    float3 probePosition = mul(worldToProbeMatrix, float4(matData.worldPosition, 1.0f)).xyz;
+
+
+    uint index = probeData.Index & REFLECTION_PROBE_INDEX_BITMASK;
+    bool bIsSphere = (probeData.Index & REFLECTION_PROBE_IS_SPHERE) > 0;
+    if (bIsSphere)
+    {
+      float bla = dot(probePosition, probePosition);
+      if (bla > 1.0f)
+        continue;
+    }
+    else
+    {
+      if (probePosition.x < -1.0f || probePosition.x > 1.0f
+       || probePosition.y < -1.0f || probePosition.y > 1.0f
+       || probePosition.z < -1.0f || probePosition.z > 1.0f)
+         continue;
+    }
+    //float4 pos = TransformToPosition(probeData.worldToProbeMatrix);
+    //float4 coord = float4(matData.worldPosition.xyz + pos.xyz, index);
+
+
+    float3 CubemapPositionWS = probeData.ProbePosition.xyz;
+    float3 PositionWS = matData.worldPosition;
+    float3 ReflDirectionWS = reflect(-viewVector, matData.worldNormal);
+    // Intersection with OBB convert to unit box space
+    // Transform in local unit parallax cube space (scaled and rotated)
+    float3 RayLS = mul(WorldToLocal, ReflDirectionWS).xyz;
+    float3 PositionLS = probePosition;//mul(WorldToLocal, PositionWS).xyz;
+
+    float3 Unitary = float3(1.0f, 1.0f, 1.0f);
+    float3 FirstPlaneIntersect  = (Unitary - PositionLS) / RayLS;
+    float3 SecondPlaneIntersect = (-Unitary - PositionLS) / RayLS;
+    float3 FurthestPlane = max(FirstPlaneIntersect, SecondPlaneIntersect);
+    float Distance = min(FurthestPlane.x, min(FurthestPlane.y, FurthestPlane.z));
+
+    // Use Distance in WS directly to recover intersection
+    float3 IntersectPositionWS = PositionWS + ReflDirectionWS * Distance;
+    ReflDirectionWS = IntersectPositionWS - CubemapPositionWS;
+
+
+    float3 reflectionDir = CubeMapDirection(ReflDirectionWS);
+    float4 coord = float4(reflectionDir, index);
+    float mipLevel = MipLevelFromRoughness(matData.roughness, NUM_REFLECTION_MIPS);
+    float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgb;
+    ref = matData.specularColor * indirectLight;// * occlusion;
+    //ref = );
+    //float4 coord = float4(-probePosition, index);
+    //float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, 0).rgb;
+    //ref = coord.xyz;//indirectLight;//float3(0, 0, 0);
+    // {
+    //   if (probeIndex == 0)
+    //   {
+    //     ref = float3(0, 0, 0);
+    //     ref.x = frac(bla);
+    //   }
+    //   if (probeIndex == 0 + 1)
+    //   {
+    //     ref = float3(0, 0, 0);
+    //     ref.y = frac(bla);
+    //   }
+    //   if (probeIndex == 0 + 2)
+    //   {
+    //     float4 coord = float4(probePosition, probeData.Index);
+    //     float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, 0).rgb;
+    //     ref = indirectLight * 100;//float3(0, 0, 0);
+    //     //ref.z = frac(bla);
+    //   }
+    // }
+
+    //matData.diffuseColor = float3(1.0f, 0.0f, 0.0f);
+    //ref = (probePosition);//float3(probeData.worldToProbeMatrix.r0.y, 0.0f, 0.0f);
+  }
+  return ref;
+}
+
 AccumulatedLight CalculateLighting(ezMaterialData matData, ezPerClusterData clusterData, float3 screenPosition, bool applySSAO)
 {
   float3 viewVector = normalize(GetCameraPosition() - matData.worldPosition);
@@ -404,6 +500,7 @@ AccumulatedLight CalculateLighting(ezMaterialData matData, ezPerClusterData clus
     skyLight = EvaluateAmbientCube(SkyIrradianceTexture, SkyIrradianceIndex, -matData.worldNormal).rgb;
     totalLight.diffuseLight += matData.subsurfaceColor * skyLight * occlusion;
   #endif*/
+  totalLight.specularLight += ComputeReflection(matData, viewVector, clusterData);
 
   return totalLight;
 }
