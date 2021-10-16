@@ -35,10 +35,10 @@ ezReflectionProbeId ezReflectionPool::Data::AddProbe(const ezWorld* pWorld, Prob
 {
   const ezUInt32 uiWorldIndex = pWorld->GetIndex();
 
-  if (uiWorldIndex >= s_pData->m_hReflectionSpecularTexture.GetCount())
-    s_pData->m_hReflectionSpecularTexture.SetCount(uiWorldIndex + 1);
+  if (uiWorldIndex >= s_pData->m_WorldReflectionData.GetCount())
+    s_pData->m_WorldReflectionData.SetCount(uiWorldIndex + 1);
 
-  ezReflectionPool::Data::WorldReflectionData& worldReflectionData = s_pData->m_hReflectionSpecularTexture[uiWorldIndex];
+  ezReflectionPool::Data::WorldReflectionData& worldReflectionData = s_pData->m_WorldReflectionData[uiWorldIndex];
   if (worldReflectionData.m_uiRegisteredProbeCount == 0)
   {
     s_pData->CreateWorldReflectionData(worldReflectionData);
@@ -57,13 +57,13 @@ ezReflectionProbeId ezReflectionPool::Data::AddProbe(const ezWorld* pWorld, Prob
 ezReflectionPool::Data::WorldReflectionData& ezReflectionPool::Data::GetWorldData(const ezWorld* pWorld)
 {
   const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-  return s_pData->m_hReflectionSpecularTexture[uiWorldIndex];
+  return s_pData->m_WorldReflectionData[uiWorldIndex];
 }
 
 void ezReflectionPool::Data::RemoveProbe(const ezWorld* pWorld, ezReflectionProbeId id)
 {
   const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-  ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_hReflectionSpecularTexture[uiWorldIndex];
+  ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_WorldReflectionData[uiWorldIndex];
 
   UnmapProbe(uiWorldIndex, data, id);
 
@@ -173,6 +173,7 @@ void ezReflectionPool::Data::MapProbe(const ezUInt32 uiWorldIndex, ezReflectionP
 {
   ProbeData& probeData = data.m_Probes.GetValueUnchecked(id.m_InstanceIndex);
   probeData.m_uiReflectionIndex = iReflectionIndex;
+  EZ_ASSERT_DEBUG(data.m_MappedCubes[probeData.m_uiReflectionIndex].IsInvalidated(), "A probe is already mapped on this index.");
   data.m_MappedCubes[probeData.m_uiReflectionIndex] = id;
   data.m_ActiveProbes.PushBack({id, 0.0f});
 }
@@ -182,7 +183,7 @@ void ezReflectionPool::Data::UnmapProbe(const ezUInt32 uiWorldIndex, ezReflectio
   ProbeData& probeData = data.m_Probes.GetValueUnchecked(id.m_InstanceIndex);
   if (probeData.m_uiReflectionIndex != -1)
   {
-    data.m_UnusedProbeSlots.PushBack(probeData.m_uiReflectionIndex);
+    //data.m_UnusedProbeSlots.PushBack(probeData.m_uiReflectionIndex);
     data.m_MappedCubes[probeData.m_uiReflectionIndex].Invalidate();
     probeData.m_uiReflectionIndex = -1;
 
@@ -235,7 +236,7 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
 {
   EZ_LOCK(s_pData->m_Mutex);
   const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-  ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_hReflectionSpecularTexture[uiWorldIndex];
+  ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_WorldReflectionData[uiWorldIndex];
   ProbeData& probeData = data.m_Probes.GetValueUnchecked(id.m_InstanceIndex);
   probeData.m_fPriority += fPriority;
   const ezInt32 iMappedIndex = probeData.m_uiReflectionIndex;
@@ -249,6 +250,7 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
   if (probeData.m_uiIndexInUpdateQueue != -1)
   {
     ProbeUpdateInfo& info = s_pData->m_DynamicUpdates[probeData.m_uiIndexInUpdateQueue];
+    EZ_ASSERT_DEBUG(info.m_UpdateTarget.m_Id == id, "");
     if (!info.m_bCalledThisFrame)
     {
       bool bDone = false;
@@ -290,7 +292,7 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
   }
 
   // Not mapped in the atlas - cannot render it.
-  if (iMappedIndex <= 0)
+  if (iMappedIndex < 0)
     return;
 
 #if EZ_ENABLED(EZ_COMPILE_FOR_DEVELOPMENT)
@@ -338,7 +340,14 @@ ezReflectionProbeId ezReflectionPool::RegisterSkyLight(const ezWorld* pWorld, ez
   ProbeData probe;
   s_pData->UpdateSkyLightData(probe, desc, pComponent);
 
-  return s_pData->AddProbe(pWorld, std::move(probe));
+  ezReflectionProbeId id = s_pData->AddProbe(pWorld, std::move(probe));
+
+  ezReflectionPool::Data::WorldReflectionData& worldReflectionData = s_pData->m_WorldReflectionData[uiWorldIndex];
+
+  // Always map sky light at slot 0.
+  s_pData->MapProbe(uiWorldIndex, worldReflectionData, id, 0);
+
+  return id;
 }
 
 void ezReflectionPool::DeregisterSkyLight(const ezWorld* pWorld, ezReflectionProbeId id)
@@ -369,10 +378,11 @@ void ezReflectionPool::UpdateSkyLight(const ezWorld* pWorld, ezReflectionProbeId
 void ezReflectionPool::Data::PreExtraction()
 {
   EZ_LOCK(s_pData->m_Mutex);
-  const ezUInt32 uiWorldCount = s_pData->m_hReflectionSpecularTexture.GetCount();
+  const ezUInt32 uiWorldCount = s_pData->m_WorldReflectionData.GetCount();
+
   for (ezUInt32 uiWorld = 0; uiWorld < uiWorldCount; uiWorld++)
   {
-    ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_hReflectionSpecularTexture[uiWorld];
+    ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_WorldReflectionData[uiWorld];
     if (data.m_uiRegisteredProbeCount == 0)
       continue;
 
@@ -391,15 +401,38 @@ void ezReflectionPool::Data::PreExtraction()
     data.m_UnusedProbeSlots.Clear();
     data.m_AddProbes.Clear();
   }
+
+  
+  // Schedule new dynamic updates
+  {
+    const ezUInt32 uiCount = m_DynamicUpdates.GetCount();
+    for (ezUInt32 i = 0; i < uiCount; i++)
+    {
+      ProbeUpdateInfo& info = m_DynamicUpdates[i];
+      info.m_bCalledThisFrame = false;
+      // is done?
+      if (!info.m_bInUse && !m_DynamicUpdateQueue.IsEmpty())
+      {
+        DynamicUpdate nextUpdate = m_DynamicUpdateQueue.PeekFront();
+        m_DynamicUpdateQueue.PopFront();
+        m_PendingDynamicUpdate.Remove(nextUpdate);
+        info.Setup(nextUpdate);
+
+        ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_WorldReflectionData[nextUpdate.m_uiWorldIndex];
+        ProbeData& probeData = data.m_Probes.GetValueUnchecked(nextUpdate.m_Id.m_InstanceIndex);
+        probeData.m_uiIndexInUpdateQueue = i;
+      }
+    }
+  }
 }
 
 void ezReflectionPool::Data::PostExtraction()
 {
   EZ_LOCK(s_pData->m_Mutex);
-  const ezUInt32 uiWorldCount = s_pData->m_hReflectionSpecularTexture.GetCount();
+  const ezUInt32 uiWorldCount = s_pData->m_WorldReflectionData.GetCount();
   for (ezUInt32 uiWorld = 0; uiWorld < uiWorldCount; uiWorld++)
   {
-    ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_hReflectionSpecularTexture[uiWorld];
+    ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_WorldReflectionData[uiWorld];
     if (data.m_uiRegisteredProbeCount == 0)
       continue;
 
@@ -481,6 +514,11 @@ void ezReflectionPool::Data::PostExtraction()
 
     // Enqueue dynamic probe updates
     {
+      // We add the skylight again as we want to consider it for dynamic updates.
+      if (!data.m_SkyLight.IsInvalidated())
+      {
+        data.m_ActiveProbes.PushBack({data.m_SkyLight, ezMath::MaxValue<float>()});
+      }
       const ezUInt32 uiMaxCount = data.m_ActiveProbes.GetCount();
       for (ezUInt32 i = 0; i < uiMaxCount; i++)
       {
@@ -504,25 +542,4 @@ void ezReflectionPool::Data::PostExtraction()
     }
   }
 
-  // Schedule new dynamic updates
-  {
-    const ezUInt32 uiCount = m_DynamicUpdates.GetCount();
-    for (ezUInt32 i = 0; i < uiCount; i++)
-    {
-      ProbeUpdateInfo& info = m_DynamicUpdates[i];
-      info.m_bCalledThisFrame = false;
-      // is done?
-      if (!info.m_bInUse && !m_DynamicUpdateQueue.IsEmpty())
-      {
-        DynamicUpdate nextUpdate = m_DynamicUpdateQueue.PeekFront();
-        m_DynamicUpdateQueue.PopFront();
-        m_PendingDynamicUpdate.Remove(nextUpdate);
-        info.Setup(nextUpdate);
-
-        ezReflectionPool::Data::WorldReflectionData& data = s_pData->m_hReflectionSpecularTexture[nextUpdate.m_uiWorldIndex];
-        ProbeData& probeData = data.m_Probes.GetValueUnchecked(nextUpdate.m_Id.m_InstanceIndex);
-        probeData.m_uiIndexInUpdateQueue = i;
-      }
-    }
-  }
 }

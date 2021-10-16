@@ -478,6 +478,7 @@ bool ezQtContainerWindow::eventFilter(QObject* obj, QEvent* e)
       {
         pWindow->CloseDocumentWindow();
       }
+      qApp->processEvents();
     }
   }
   return false;

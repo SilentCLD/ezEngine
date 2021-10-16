@@ -136,13 +136,13 @@ ezReflectionPool::Data::~Data()
     m_hFallbackReflectionSpecularTexture.Invalidate();
   }
 
-  ezUInt32 uiWorldReflectionCount = m_hReflectionSpecularTexture.GetCount();
+  ezUInt32 uiWorldReflectionCount = m_WorldReflectionData.GetCount();
   for (ezUInt32 i = 0; i < uiWorldReflectionCount; ++i)
   {
-    WorldReflectionData& reflectionData = m_hReflectionSpecularTexture[i];
+    WorldReflectionData& reflectionData = m_WorldReflectionData[i];
     EZ_ASSERT_DEV(reflectionData.m_uiRegisteredProbeCount == 0, "Not all probes were deregistered.");
   }
-  m_hReflectionSpecularTexture.Clear();
+  m_WorldReflectionData.Clear();
 
   if (!m_hSkyIrradianceTexture.IsInvalidated())
   {
@@ -309,7 +309,7 @@ void ezReflectionPool::Data::CreateReflectionViewsAndResources()
 
   if (m_DynamicUpdates.IsEmpty())
   {
-    m_DynamicUpdates.SetCount(2);
+    m_DynamicUpdates.SetCount(1);
   }
 
   if (m_hFallbackReflectionSpecularTexture.IsInvalidated())
@@ -480,15 +480,18 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
     if (step.m_UpdateStep == UpdateStep::Filter)
     {
       const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-      renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(m_hReflectionSpecularTexture[uiWorldIndex].m_hReflectionSpecularTexture));
+      renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(m_WorldReflectionData[uiWorldIndex].m_hReflectionSpecularTexture));
+
+      ezUInt32 bla = 2;
       if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
       {
+        bla = pWorld->GetIndex();
         renderTargetSetup.SetRenderTarget(2, pDevice->GetDefaultRenderTargetView(m_hSkyIrradianceTexture));
       }
       pView->SetRenderPassProperty("ReflectionFilterPass", "Intensity", probeData.m_desc.m_fIntensity);
       pView->SetRenderPassProperty("ReflectionFilterPass", "Saturation", probeData.m_desc.m_fSaturation);
       pView->SetRenderPassProperty("ReflectionFilterPass", "SpecularOutputIndex", probeData.m_uiReflectionIndex);
-      pView->SetRenderPassProperty("ReflectionFilterPass", "IrradianceOutputIndex", pWorld->GetIndex());
+      pView->SetRenderPassProperty("ReflectionFilterPass", "IrradianceOutputIndex", bla);
       ezGALTextureHandle hSourceTexture = updateInfo.m_hCubemap;
       if (probeData.m_desc.m_Mode == ezReflectionProbeMode::Static)
       {
@@ -518,6 +521,11 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
     ezVec3 vPosition = transform.m_vPosition;
     ezVec3 vForward2 = transform.TransformDirection(vForward[uiFaceIndex]);
     ezVec3 vUp2 = transform.TransformDirection(vUp[uiFaceIndex]);
+    if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
+    {
+      vForward2 = vForward[uiFaceIndex];
+      vUp2 = vUp[uiFaceIndex];
+    }
 
     const float fFar = ezMath::Max(0.01f, ezMath::Abs(vScale.x) + ezMath::Abs(vScale.y) + ezMath::Abs(vScale.z)); // Only one component is actually set due to multiplying with vForward.
     const float fNear = (0.1f >= fFar) ? fFar / 2.0f : 0.1f;
@@ -646,10 +654,10 @@ ezUInt32 ezReflectionPool::GetReflectionCubeMapSize()
 // static
 ezGALTextureHandle ezReflectionPool::GetReflectionSpecularTexture(ezUInt32 uiWorldIndex)
 {
-  if (uiWorldIndex < s_pData->m_hReflectionSpecularTexture.GetCount())
+  if (uiWorldIndex < s_pData->m_WorldReflectionData.GetCount())
   {
-    if (s_pData->m_hReflectionSpecularTexture[uiWorldIndex].m_uiRegisteredProbeCount > 0)
-      return s_pData->m_hReflectionSpecularTexture[uiWorldIndex].m_hReflectionSpecularTexture;
+    if (s_pData->m_WorldReflectionData[uiWorldIndex].m_uiRegisteredProbeCount > 0)
+      return s_pData->m_WorldReflectionData[uiWorldIndex].m_hReflectionSpecularTexture;
   }
   return s_pData->m_hFallbackReflectionSpecularTexture;
 }

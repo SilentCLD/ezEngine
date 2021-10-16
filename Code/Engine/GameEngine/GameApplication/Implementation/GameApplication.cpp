@@ -100,14 +100,7 @@ bool ezGameApplication::IsGameUpdateEnabled() const
 
 void ezGameApplication::Run_WorldUpdateAndRender()
 {
-  ezRenderWorld::BeginFrame();
-
-  ezGALDevice* pDevice = ezGALDevice::GetDefaultDevice();
-
-  // On most platforms it doesn't matter that much how early this happens.
-  // But on HoloLens this executes something that needs to be done at the right time,
-  // for the reprojection to work properly.
-  pDevice->BeginFrame();
+  
 
   ezTaskGroupID updateTaskID;
   if (ezRenderWorld::GetUseMultithreadedRendering())
@@ -118,6 +111,15 @@ void ezGameApplication::Run_WorldUpdateAndRender()
   {
     UpdateWorldsAndExtractViews();
   }
+
+  ezRenderWorld::BeginFrame();
+
+  ezGALDevice* pDevice = ezGALDevice::GetDefaultDevice();
+
+  // On most platforms it doesn't matter that much how early this happens.
+  // But on HoloLens this executes something that needs to be done at the right time,
+  // for the reprojection to work properly.
+  pDevice->BeginFrame();
 
   RenderFps();
   RenderConsole();

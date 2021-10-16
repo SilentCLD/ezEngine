@@ -292,99 +292,137 @@ float CalculateShadowTerm(ezMaterialData matData, float3 lightVector, float dist
   return 1.0f;
 }
 
-
+// Frostbite course notes
+float computeDistanceBaseRoughness(float distIntersectionToShadedPoint, float distIntersectionToProbeCenter, float linearRoughness)
+{
+  // To avoid artifacts we clamp to the original linearRoughness
+  // which introduces an acceptable bias and allows conservation
+  // of mirror reflection behavior for a smooth surface.
+  float newLinearRoughness = clamp(distIntersectionToShadedPoint / distIntersectionToProbeCenter * linearRoughness,
+    0, linearRoughness);
+  return lerp(newLinearRoughness, linearRoughness, linearRoughness);
+}
 
 float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerClusterData clusterData)
 {
   uint firstItemIndex = clusterData.offset;
   uint lastItemIndex = firstItemIndex + GET_PROBE_INDEX(clusterData.counts);
 
-  float aa = (lastItemIndex - firstItemIndex);
-  //return float3(aa, aa, aa);
+  const float3 PositionWS = matData.worldPosition;
+  const float3 ReflDirectionWS = reflect(-viewVector, matData.worldNormal);
+
+  float weight = 0.0f;
   float3 ref = float3(0, 0, 0);
+  float4 indirectLight;
   [loop]
   for (uint i = firstItemIndex; i < lastItemIndex; ++i)
   {
-    uint itemIndex = clusterItemBuffer[i];
-    uint probeIndex = GET_PROBE_INDEX(itemIndex);
+    const uint itemIndex = clusterItemBuffer[i];
+    const uint probeIndex = GET_PROBE_INDEX(itemIndex);
 
-    ezPerReflectionProbeData probeData = perPerReflectionProbeDataBuffer[probeIndex];
+    const ezPerReflectionProbeData probeData = perPerReflectionProbeDataBuffer[probeIndex];
 
-    float4x4 worldToProbeMatrix = TransformToMatrix(probeData.worldToProbeMatrix);
-    float3x3 WorldToLocal = TransformToRotation(probeData.worldToProbeMatrix);
-    float3 probePosition = mul(worldToProbeMatrix, float4(matData.worldPosition, 1.0f)).xyz;
+    const float4x4 worldToProbeMatrix = TransformToMatrix(probeData.worldToProbeMatrix);
+    const float3x3 WorldToLocal = TransformToRotation(probeData.worldToProbeMatrix);
+    const float3 probePosition = mul(worldToProbeMatrix, float4(matData.worldPosition, 1.0f)).xyz;
 
+    // Build rotation only matrix by normalizing probe transform.
+    float3 XAxis = normalize(float3(WorldToLocal._m00, WorldToLocal._m01, WorldToLocal._m02));
+    float3 YAxis = normalize(float3(WorldToLocal._m10, WorldToLocal._m11, WorldToLocal._m12));
+    float3 ZAxis = normalize(float3(WorldToLocal._m20, WorldToLocal._m21, WorldToLocal._m22));
+    float3x3 WorldToLocal2 = float3x3(XAxis, YAxis, ZAxis);
 
-    uint index = probeData.Index & REFLECTION_PROBE_INDEX_BITMASK;
-    bool bIsSphere = (probeData.Index & REFLECTION_PROBE_IS_SPHERE) > 0;
+    const uint index = GET_REFLECTION_PROBE_INDEX(probeData.Index);
+    const bool bIsSphere = (probeData.Index & REFLECTION_PROBE_IS_SPHERE) > 0;
+    float roughness = matData.roughness;
     if (bIsSphere)
     {
-      float bla = dot(probePosition, probePosition);
-      if (bla > 1.0f)
+      // boundary clamp.
+      float dist = dot(probePosition, probePosition);
+      if (dist > 1.0f)
         continue;
+
+      // Rotate ray into probe space.
+      // The probe matrix swaps various components which we need to undo here.
+      float3 reflectionDir = CubeMapDirection(mul(WorldToLocal2, ReflDirectionWS).zxy);
+      reflectionDir.y *= -1;
+
+      // Sample the cube map
+      float4 coord = float4(reflectionDir, index);
+      float mipLevel = MipLevelFromRoughness(matData.roughness, NUM_REFLECTION_MIPS);
+      indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba;
     }
     else
     {
-      if (probePosition.x < -1.0f || probePosition.x > 1.0f
-       || probePosition.y < -1.0f || probePosition.y > 1.0f
-       || probePosition.z < -1.0f || probePosition.z > 1.0f)
+      // boundary clamp.
+      float3 Dist = max(probePosition, -probePosition);
+      float maxDist = max(Dist.x, max(Dist.y, Dist.z));
+      if (maxDist > 1.0f)
          continue;
+
+      // Box projection.
+      // taken from: https://seblagarde.wordpress.com/2012/09/29/image-based-lighting-approaches-and-parallax-corrected-cubemap/
+      float3 CubemapPositionWS = probeData.ProbePosition.xyz;
+      
+      // Intersection with OBB convert to unit box space
+      // Transform in local unit parallax cube space (scaled and rotated)
+      float3 RayLS = mul(WorldToLocal, ReflDirectionWS).xyz;
+      float3 PositionLS = probePosition;
+
+      float3 Unitary = float3(1.0f, 1.0f, 1.0f);
+      float3 FirstPlaneIntersect  = (Unitary - PositionLS) / RayLS;
+      float3 SecondPlaneIntersect = (-Unitary - PositionLS) / RayLS;
+      float3 FurthestPlane = max(FirstPlaneIntersect, SecondPlaneIntersect);
+      float Distance = min(FurthestPlane.x, min(FurthestPlane.y, FurthestPlane.z));
+
+      // Use Distance in WS directly to recover intersection
+      float3 IntersectPositionWS = PositionWS + ReflDirectionWS * Distance;
+  
+          
+      // The blob post above assumes that the cube maps are always rendered from world space without any rotation
+      // in the rendering of the cube map itself. However, we do rotate the rendering of the cube maps so we can
+      // correctly clamp the far plane for each side of the cube. Thus, we can't take the world space dir and use
+      // it as a reflection lookup. We need to transform it into the cube map space. However, the image in the cube
+      // map is not squished according to the AABB so we ONLY need to apply the rotational part of the transform,
+      // ignoring scale.
+      //float3 reflectionDir = CubeMapDirection(IntersectPositionWS - CubemapPositionWS);
+
+      // The probe matrix swaps various components which we need to undo here.
+      float3 reflectionDir = CubeMapDirection(mul(WorldToLocal2, IntersectPositionWS - CubemapPositionWS).zxy);
+      reflectionDir.y *= -1;
+
+      // Sample the cube map
+      float4 coord = float4(reflectionDir, index);
+      roughness = computeDistanceBaseRoughness(length(IntersectPositionWS - matData.worldPosition), length(IntersectPositionWS - CubemapPositionWS), matData.roughness);
+      float mipLevel = MipLevelFromRoughness(roughness, NUM_REFLECTION_MIPS);
+      indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba;
     }
-    //float4 pos = TransformToPosition(probeData.worldToProbeMatrix);
-    //float4 coord = float4(matData.worldPosition.xyz + pos.xyz, index);
 
+    // Accumulate contribution.
+    float remainingWeight = 1.0f - weight;
+    if (indirectLight.a < remainingWeight)
+    {
+      ref += indirectLight.rgb;
+      weight += indirectLight.a;
+    }
+    else
+    {
+      float fScaleDown = remainingWeight / indirectLight.a;
+      ref += indirectLight.rgb * fScaleDown;
+      weight += indirectLight.a * fScaleDown;
+    }
 
-    float3 CubemapPositionWS = probeData.ProbePosition.xyz;
-    float3 PositionWS = matData.worldPosition;
-    float3 ReflDirectionWS = reflect(-viewVector, matData.worldNormal);
-    // Intersection with OBB convert to unit box space
-    // Transform in local unit parallax cube space (scaled and rotated)
-    float3 RayLS = mul(WorldToLocal, ReflDirectionWS).xyz;
-    float3 PositionLS = probePosition;//mul(WorldToLocal, PositionWS).xyz;
-
-    float3 Unitary = float3(1.0f, 1.0f, 1.0f);
-    float3 FirstPlaneIntersect  = (Unitary - PositionLS) / RayLS;
-    float3 SecondPlaneIntersect = (-Unitary - PositionLS) / RayLS;
-    float3 FurthestPlane = max(FirstPlaneIntersect, SecondPlaneIntersect);
-    float Distance = min(FurthestPlane.x, min(FurthestPlane.y, FurthestPlane.z));
-
-    // Use Distance in WS directly to recover intersection
-    float3 IntersectPositionWS = PositionWS + ReflDirectionWS * Distance;
-    ReflDirectionWS = IntersectPositionWS - CubemapPositionWS;
-
-
-    float3 reflectionDir = CubeMapDirection(ReflDirectionWS);
-    float4 coord = float4(reflectionDir, index);
-    float mipLevel = MipLevelFromRoughness(matData.roughness, NUM_REFLECTION_MIPS);
-    float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgb;
-    ref = matData.specularColor * indirectLight;// * occlusion;
-    //ref = );
-    //float4 coord = float4(-probePosition, index);
-    //float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, 0).rgb;
-    //ref = coord.xyz;//indirectLight;//float3(0, 0, 0);
-    // {
-    //   if (probeIndex == 0)
-    //   {
-    //     ref = float3(0, 0, 0);
-    //     ref.x = frac(bla);
-    //   }
-    //   if (probeIndex == 0 + 1)
-    //   {
-    //     ref = float3(0, 0, 0);
-    //     ref.y = frac(bla);
-    //   }
-    //   if (probeIndex == 0 + 2)
-    //   {
-    //     float4 coord = float4(probePosition, probeData.Index);
-    //     float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, 0).rgb;
-    //     ref = indirectLight * 100;//float3(0, 0, 0);
-    //     //ref.z = frac(bla);
-    //   }
-    // }
-
-    //matData.diffuseColor = float3(1.0f, 0.0f, 0.0f);
-    //ref = (probePosition);//float3(probeData.worldToProbeMatrix.r0.y, 0.0f, 0.0f);
+    if (weight >= 1.0f)
+      return ref;
   }
+
+  // Global fallback probe.
+  float3 reflectionDir = CubeMapDirection(ReflDirectionWS);
+  float4 coord = float4(reflectionDir, 0);
+  float mipLevel = MipLevelFromRoughness(matData.roughness, NUM_REFLECTION_MIPS);
+  indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba;
+  ref += indirectLight * (1.0f - weight);
+
   return ref;
 }
 
@@ -489,18 +527,14 @@ AccumulatedLight CalculateLighting(ezMaterialData matData, ezPerClusterData clus
   totalLight.diffuseLight += matData.diffuseColor * skyLight * occlusion;
   
   // indirect specular
-  float3 reflectionDir = CubeMapDirection(reflect(-viewVector, matData.worldNormal));
-  float4 coord = float4(reflectionDir, 0);
-  float mipLevel = MipLevelFromRoughness(matData.roughness, NUM_REFLECTION_MIPS);
-  float3 indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgb;
-  totalLight.specularLight += matData.specularColor * indirectLight * occlusion;
+  totalLight.specularLight += matData.specularColor * ComputeReflection(matData, viewVector, clusterData) * occlusion;
+  //totalLight.specularLight += ComputeReflection(matData, viewVector, clusterData);
 
   // enable once we have proper sky visibility
   /*#if defined(USE_MATERIAL_SUBSURFACE_COLOR)
     skyLight = EvaluateAmbientCube(SkyIrradianceTexture, SkyIrradianceIndex, -matData.worldNormal).rgb;
     totalLight.diffuseLight += matData.subsurfaceColor * skyLight * occlusion;
   #endif*/
-  totalLight.specularLight += ComputeReflection(matData, viewVector, clusterData);
 
   return totalLight;
 }

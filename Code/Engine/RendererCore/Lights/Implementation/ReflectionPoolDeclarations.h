@@ -182,12 +182,11 @@ struct ezReflectionPool::Data
 
     ezIdTable<ezReflectionProbeId, ProbeData> m_Probes;
     ezReflectionProbeId m_SkyLight; // SkyLight is always fixed at reflectionIndex 0.
-
-    ezGALTextureHandle m_hReflectionSpecularTexture;
     ezUInt32 m_uiRegisteredProbeCount = 0;
-
-    // Mapping
     ezStaticArray<ezReflectionProbeId, s_uiNumReflectionProbeCubeMaps> m_MappedCubes;
+
+    // GPU Data
+    ezGALTextureHandle m_hReflectionSpecularTexture;
 
     // Cleared every frame:
     ezDynamicArray<SortedProbes> m_SortedProbes;                                 // All probes exiting in the scene, sorted by priority.
@@ -205,7 +204,7 @@ struct ezReflectionPool::Data
   void MapProbe(const ezUInt32 uiWorldIndex, ezReflectionPool::Data::WorldReflectionData& data, ezReflectionProbeId id, ezInt32 iReflectionIndex);
   void UnmapProbe(const ezUInt32 uiWorldIndex, ezReflectionPool::Data::WorldReflectionData& data, ezReflectionProbeId id);
 
-  // Dynamic Update Queue
+  // Dynamic Update Queue (all worlds combined)
   void PreExtraction();
   void PostExtraction();
   void GenerateUpdateSteps();
@@ -213,7 +212,7 @@ struct ezReflectionPool::Data
   ezHashSet<DynamicUpdate> m_PendingDynamicUpdate;
   ezDeque<DynamicUpdate> m_DynamicUpdateQueue;
 
-  // Dynamic Updates
+  // Active Dynamic Updates
   ezDynamicArray<ReflectionView> m_RenderViews;
   ezDynamicArray<ReflectionView> m_FilterViews;
   ezHybridArray<ProbeUpdateInfo, 2> m_DynamicUpdates;
@@ -227,9 +226,9 @@ struct ezReflectionPool::Data
   ezMutex m_Mutex;
   ezUInt64 m_uiWorldHasSkyLight = 0;
   ezUInt64 m_uiSkyIrradianceChanged = 0;
+  ezHybridArray<WorldReflectionData, 64> m_WorldReflectionData;
 
   // GPU storage
-  ezHybridArray<WorldReflectionData, 64> m_hReflectionSpecularTexture;
   ezGALTextureHandle m_hFallbackReflectionSpecularTexture;
   ezGALTextureHandle m_hSkyIrradianceTexture;
   ezHybridArray<ezAmbientCube<ezColorLinear16f>, 64> m_SkyIrradianceStorage;

@@ -86,7 +86,7 @@ inline float D_GGX_Divide_Pi (float NdotH, float roughness)
 }
 
 // Ref: Listing 19 in "Moving Frostbite to PBR"
-float3  integrateCubeLDOnly(in float3 V,in float3 N,in float roughness)
+float4  integrateCubeLDOnly(in float3 V,in float3 N,in float roughness)
 {
   uint sampleCount = 64;
   float width, height, mipCount;
@@ -95,7 +95,7 @@ float3  integrateCubeLDOnly(in float3 V,in float3 N,in float roughness)
   float3 tangentX, tangentY;
   GetLocalFrame(N, tangentX, tangentY);
 
-  float3  accBrdf = 0;
+  float4  accBrdf = 0;
   float   accBrdfWeight = 0;
   for (uint i=0; i<sampleCount; ++i)
   {
@@ -133,7 +133,7 @@ float3  integrateCubeLDOnly(in float3 V,in float3 N,in float roughness)
  
       float4  Li = InputCubemap.SampleLevel(LinearSampler, L, mipLevel);
 
-      accBrdf  += Li.rgb * NdotL;
+      accBrdf  += Li * NdotL;
       accBrdfWeight  += NdotL;
     }
   }
@@ -149,7 +149,7 @@ float4 main(PS_IN input) : SV_Target
 
   float roughness = RoughnessFromMipLevel(MipLevel, 6);
 
-  float3 inputColor;
+  float4 inputColor;
   if (MipLevel == 0)
   {
     inputColor = InputCubemap.Sample(LinearSampler, CubeMapDirection(dir));
@@ -162,6 +162,5 @@ float4 main(PS_IN input) : SV_Target
   float luminance = GetLuminance(inputColor);
   inputColor = lerp(luminance, inputColor, Saturation) * Intensity;
 
-  float4 res = float4(inputColor, (float)OutputIndex);
-  return res;
+  return inputColor;
 }
