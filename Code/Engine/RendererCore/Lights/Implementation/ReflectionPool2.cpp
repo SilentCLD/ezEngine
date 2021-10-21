@@ -300,10 +300,16 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
   if (probeData.m_desc.m_bShowDebugInfo && s_pData->m_hDebugMaterial.GetCount() == uiMipLevels * s_uiNumReflectionProbeCubeMaps)
   {
     const ezGameObject* pOwner = pComponent->GetOwner();
+    const ezTransform ownerTransform = pOwner->GetGlobalTransform();
     for (ezUInt32 i = 0; i < uiMipLevels; i++)
     {
       ezMeshRenderData* pRenderData = ezCreateRenderDataForThisFrame<ezMeshRenderData>(pOwner);
-      pRenderData->m_GlobalTransform = pOwner->GetGlobalTransform();
+      pRenderData->m_GlobalTransform.m_vPosition = ownerTransform.m_vPosition;
+      pRenderData->m_GlobalTransform.m_vScale = ezVec3(1.0f);
+      if (!probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
+      {
+        pRenderData->m_GlobalTransform.m_qRotation = ownerTransform.m_qRotation;
+      }
       pRenderData->m_GlobalTransform.m_vPosition.z += s_fDebugSphereRadius * i * 2;
       pRenderData->m_GlobalBounds = pOwner->GetGlobalBounds();
       pRenderData->m_hMesh = s_pData->m_hDebugSphere;

@@ -112,18 +112,15 @@ struct EZ_ALIGN_16(ezPerReflectionProbeData)
   {
     TRANSFORM(worldToProbeMatrix); //48
     FLOAT4(ProbePosition);
+    FLOAT4(Scale);
     UINT1(Index);
   };
 
 #if EZ_ENABLED(PLATFORM_SHADER)
   StructuredBuffer<ezPerReflectionProbeData> perPerReflectionProbeDataBuffer;
 #else // C++
-  enum AAA
-  {
-    aaa = sizeof(ezPerReflectionProbeData)
-  };
   //char (*__kaboom)[sizeof(ezPerReflectionProbeData)] = 1;
-  EZ_CHECK_AT_COMPILETIME(aaa == 80);
+  EZ_CHECK_AT_COMPILETIME(sizeof(ezPerReflectionProbeData) == 96);
 #endif
 
 CONSTANT_BUFFER(ezClusteredDataConstants, 3)

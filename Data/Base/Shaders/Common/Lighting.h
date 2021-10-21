@@ -322,15 +322,22 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
 
     const ezPerReflectionProbeData probeData = perPerReflectionProbeDataBuffer[probeIndex];
 
-    const float4x4 worldToProbeMatrix = TransformToMatrix(probeData.worldToProbeMatrix);
-    const float3x3 WorldToLocal = TransformToRotation(probeData.worldToProbeMatrix);
+    // The probe proxy space can be scaled. However, the projection of the content of the cubemap is not affected by this.
+    // Thus, we need to distinguish between the probe space and the probe's cube map space. The later is only
+    // rotated and translated but not affected by scale.
+    const float4x4 worldToProbeMatrix = float4x4(
+      probeData.worldToProbeMatrix.r0 * probeData.Scale.x,
+      probeData.worldToProbeMatrix.r1 * probeData.Scale.y,
+      probeData.worldToProbeMatrix.r2 * probeData.Scale.z, float4(0, 0, 0, 1));//TransformToMatrix(probeData.worldToProbeMatrix);
+    const float3x3 worldToProbeNormalMatrix = float3x3(
+      float3(worldToProbeMatrix._m00, worldToProbeMatrix._m01, worldToProbeMatrix._m02),
+      float3(worldToProbeMatrix._m10, worldToProbeMatrix._m11, worldToProbeMatrix._m12),
+      float3(worldToProbeMatrix._m20, worldToProbeMatrix._m21, worldToProbeMatrix._m22));//TransformToRotation(probeData.worldToProbeMatrix);
+    const float3x3 WorldToProbeCubeMapNormalMatrix = TransformToRotation(probeData.worldToProbeMatrix);
+
     const float3 probePosition = mul(worldToProbeMatrix, float4(matData.worldPosition, 1.0f)).xyz;
 
-    // Build rotation only matrix by normalizing probe transform.
-    float3 XAxis = normalize(float3(WorldToLocal._m00, WorldToLocal._m01, WorldToLocal._m02));
-    float3 YAxis = normalize(float3(WorldToLocal._m10, WorldToLocal._m11, WorldToLocal._m12));
-    float3 ZAxis = normalize(float3(WorldToLocal._m20, WorldToLocal._m21, WorldToLocal._m22));
-    float3x3 WorldToLocal2 = float3x3(XAxis, YAxis, ZAxis);
+    //return frac(probePosition);
 
     const uint index = GET_REFLECTION_PROBE_INDEX(probeData.Index);
     const bool bIsSphere = (probeData.Index & REFLECTION_PROBE_IS_SPHERE) > 0;
@@ -343,9 +350,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
         continue;
 
       // Rotate ray into probe space.
-      // The probe matrix swaps various components which we need to undo here.
-      float3 reflectionDir = CubeMapDirection(mul(WorldToLocal2, ReflDirectionWS).zxy);
-      reflectionDir.y *= -1;
+      float3 reflectionDir = CubeMapDirection(mul(WorldToProbeCubeMapNormalMatrix, ReflDirectionWS));
 
       // Sample the cube map
       float4 coord = float4(reflectionDir, index);
@@ -355,7 +360,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
     else
     {
       // boundary clamp.
-      float3 Dist = max(probePosition, -probePosition);
+      float3 Dist = abs(probePosition);//, -probePosition);
       float maxDist = max(Dist.x, max(Dist.y, Dist.z));
       if (maxDist > 1.0f)
          continue;
@@ -366,7 +371,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       
       // Intersection with OBB convert to unit box space
       // Transform in local unit parallax cube space (scaled and rotated)
-      float3 RayLS = mul(WorldToLocal, ReflDirectionWS).xyz;
+      float3 RayLS = mul(worldToProbeNormalMatrix, ReflDirectionWS);
       float3 PositionLS = probePosition;
 
       float3 Unitary = float3(1.0f, 1.0f, 1.0f);
@@ -377,8 +382,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
 
       // Use Distance in WS directly to recover intersection
       float3 IntersectPositionWS = PositionWS + ReflDirectionWS * Distance;
-  
-          
+        
       // The blob post above assumes that the cube maps are always rendered from world space without any rotation
       // in the rendering of the cube map itself. However, we do rotate the rendering of the cube maps so we can
       // correctly clamp the far plane for each side of the cube. Thus, we can't take the world space dir and use
@@ -386,10 +390,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       // map is not squished according to the AABB so we ONLY need to apply the rotational part of the transform,
       // ignoring scale.
       //float3 reflectionDir = CubeMapDirection(IntersectPositionWS - CubemapPositionWS);
-
-      // The probe matrix swaps various components which we need to undo here.
-      float3 reflectionDir = CubeMapDirection(mul(WorldToLocal2, IntersectPositionWS - CubemapPositionWS).zxy);
-      reflectionDir.y *= -1;
+      float3 reflectionDir = CubeMapDirection(mul(WorldToProbeCubeMapNormalMatrix, IntersectPositionWS - CubemapPositionWS).xyz);
 
       // Sample the cube map
       float4 coord = float4(reflectionDir, index);

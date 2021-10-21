@@ -205,27 +205,30 @@ namespace
   void FillReflectionProbeData(ezPerReflectionProbeData& perReflectionProbeData, const ezReflectionProbeRenderData* pReflectionProbeRenderData)
   {
     ezVec3 position = pReflectionProbeRenderData->m_GlobalTransform.m_vPosition;
-    ezVec3 dirForwards = pReflectionProbeRenderData->m_GlobalTransform.m_qRotation * ezVec3(1.0f, 0.0, 0.0f);
-    ezVec3 dirUp = pReflectionProbeRenderData->m_GlobalTransform.m_qRotation * ezVec3(0.0f, 0.0, 1.0f);
+    //ezVec3 dirForwards = pReflectionProbeRenderData->m_GlobalTransform.m_qRotation * ezVec3(1.0f, 0.0, 0.0f);
+    //ezVec3 dirUp = pReflectionProbeRenderData->m_GlobalTransform.m_qRotation * ezVec3(0.0f, 0.0, 1.0f);
     ezVec3 scale = pReflectionProbeRenderData->m_GlobalTransform.m_vScale.CompMul(pReflectionProbeRenderData->m_vHalfExtents);
 
+    // We store scale separately so we easily transform into probe space (with scale) and cube map space (no scale).
     auto trans = pReflectionProbeRenderData->m_GlobalTransform;
-    trans.m_vScale = trans.m_vScale.CompMul(pReflectionProbeRenderData->m_vHalfExtents);
-    auto inverse = trans.GetInverse().GetAsMat4();
+    trans.m_vScale = ezVec3(1.0f, 1.0f, 1.0f);//trans.m_vScale.CompMul(pReflectionProbeRenderData->m_vHalfExtents);
+    auto inverse = trans.GetAsMat4().GetInverse();
 
     // the CompMax prevents division by zero (thus inf, thus NaN later, then crash)
     // if negative scaling should be allowed, this would need to be changed
     scale = ezVec3(1.0f).CompDiv(scale.CompMax(ezVec3(0.00001f)));
 
-    const ezMat4 lookAt = ezGraphicsUtils::CreateLookAtViewMatrix(position, position + dirForwards, dirUp);
+    /*const ezMat4 lookAt = ezGraphicsUtils::CreateLookAtViewMatrix(position, position + dirForwards, dirUp);
     ezMat4 scaleMat;
     scaleMat.SetScalingMatrix(ezVec3(scale.y, -scale.z, scale.x));
     ezMat4 res = scaleMat * lookAt;
-    perReflectionProbeData.worldToProbeMatrix = res;
-    //perReflectionProbeData.worldToProbeMatrix = inverse;
+    perReflectionProbeData.worldToProbeMatrix = res;*/
 
+    perReflectionProbeData.worldToProbeMatrix = inverse;
+
+    perReflectionProbeData.ProbePosition = position.GetAsVec4(1.0f); // W isn't used.
+    perReflectionProbeData.Scale = scale.GetAsVec4(0.0f); // W isn't used.
     perReflectionProbeData.Index = pReflectionProbeRenderData->m_uiIndex;
-    perReflectionProbeData.ProbePosition = position.GetAsVec4(1.0f);
   }
 
 
