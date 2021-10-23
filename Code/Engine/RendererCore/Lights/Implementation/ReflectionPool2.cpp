@@ -143,6 +143,7 @@ bool ezReflectionPool::Data::UpdateSkyLightData(ProbeData& probeData, const ezRe
   {
     probeData.m_Flags = ezProbeFlags::SkyLight;
     probeData.m_hCubeMap = pSkyLight->GetCubeMap();
+    probeData.m_vHalfExtents = ezVec3(pSkyLight->GetFarPlane());
     if (probeData.m_desc.m_Mode == ezReflectionProbeMode::Dynamic)
     {
       probeData.m_Flags |= (ezProbeFlags::Dynamic | ezProbeFlags::Dirty);
@@ -164,7 +165,6 @@ bool ezReflectionPool::Data::UpdateSkyLightData(ProbeData& probeData, const ezRe
         probeData.m_hCubeMap = ezResourceManager::LoadResource<ezTextureCubeResource>(sCubeMapFile);
       }
     }
-    probeData.m_vHalfExtents = ezVec3::ZeroVector();
   }
   return bProbeTypeChanged;
 }

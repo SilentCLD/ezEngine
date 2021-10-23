@@ -32,6 +32,7 @@ EZ_BEGIN_COMPONENT_TYPE(ezSkyLightComponent, 3, ezComponentMode::Dynamic)
     EZ_SET_ACCESSOR_PROPERTY("ExcludeTags", GetExcludeTags, InsertExcludeTag, RemoveExcludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default")),
     EZ_ACCESSOR_PROPERTY("ShowDebugInfo", GetShowDebugInfo, SetShowDebugInfo),
     EZ_ACCESSOR_PROPERTY("CubeMap", GetCubeMapFile, SetCubeMapFile)->AddAttributes(new ezAssetBrowserAttribute("Texture Cube")),
+    EZ_ACCESSOR_PROPERTY("FarPlane", GetFarPlane, SetFarPlane)->AddAttributes(new ezDefaultValueAttribute(1000.0f), new ezClampValueAttribute(5.0, 10000.0f)),
   }
   EZ_END_PROPERTIES;
   EZ_BEGIN_MESSAGEHANDLERS
@@ -165,6 +166,12 @@ const char* ezSkyLightComponent::GetCubeMapFile() const
   return m_hCubeMap.IsValid() ? m_hCubeMap.GetResourceID().GetData() : "";
 }
 
+void ezSkyLightComponent::SetFarPlane(float fFarPlane)
+{
+  m_fFarPlane = fFarPlane;
+  m_bStatesDirty = true;
+}
+
 void ezSkyLightComponent::OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg)
 {
   msg.SetAlwaysVisible(GetOwner()->IsDynamic() ? ezDefaultSpatialDataCategories::RenderDynamic : ezDefaultSpatialDataCategories::RenderStatic);
@@ -198,6 +205,7 @@ void ezSkyLightComponent::SerializeComponent(ezWorldWriter& stream) const
   s << m_desc.m_fIntensity;
   s << m_desc.m_fSaturation;
   s << m_hCubeMap;
+  s << m_fFarPlane;
 }
 
 void ezSkyLightComponent::DeserializeComponent(ezWorldReader& stream)
@@ -215,6 +223,10 @@ void ezSkyLightComponent::DeserializeComponent(ezWorldReader& stream)
   if (uiVersion >= 2)
   {
     s >> m_hCubeMap;
+  }
+  if (uiVersion >= 3)
+  {
+    s >> m_fFarPlane;
   }
 }
 

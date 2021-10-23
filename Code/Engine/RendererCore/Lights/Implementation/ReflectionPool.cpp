@@ -504,7 +504,7 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
     {
       if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
       {
-        vScale *= 100;
+        vScale = vScale.CompMul(probeData.m_vHalfExtents);
       }
       else if (probeData.m_Flags.IsSet(ezProbeFlags::Sphere))
       {

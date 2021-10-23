@@ -47,6 +47,7 @@ EZ_BEGIN_COMPONENT_TYPE(ezSphereReflectionProbeComponent, 1, ezComponentMode::Dy
   EZ_BEGIN_PROPERTIES
   {
     EZ_ACCESSOR_PROPERTY("Radius", GetRadius, SetRadius)->AddAttributes(new ezClampValueAttribute(0.0f, {}), new ezDefaultValueAttribute(5.0f)),
+    EZ_ACCESSOR_PROPERTY("Falloff", GetFalloff, SetFalloff)->AddAttributes(new ezClampValueAttribute(0.0f, 1.0f), new ezDefaultValueAttribute(0.1f)),
   }
   EZ_END_PROPERTIES;
   EZ_BEGIN_FUNCTIONS
@@ -76,6 +77,8 @@ EZ_BEGIN_COMPONENT_TYPE(ezBoxReflectionProbeComponent, 1, ezComponentMode::Dynam
   EZ_BEGIN_PROPERTIES
   {
     EZ_ACCESSOR_PROPERTY("Extents", GetExtents, SetExtents)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), {}), new ezDefaultValueAttribute(ezVec3(5.0f))),
+    EZ_ACCESSOR_PROPERTY("PositiveFalloff", GetPositiveFalloff, SetPositiveFalloff)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), ezVec3(1.0f)), new ezDefaultValueAttribute(ezVec3(0.1f))),
+    EZ_ACCESSOR_PROPERTY("NegativeFalloff", GetNegativeFalloff, SetNegativeFalloff)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), ezVec3(1.0f)), new ezDefaultValueAttribute(ezVec3(0.1f))),
   }
   EZ_END_PROPERTIES;
   EZ_BEGIN_FUNCTIONS
@@ -254,6 +257,11 @@ float ezSphereReflectionProbeComponent::GetRadius() const
   return m_fRadius;
 }
 
+void ezSphereReflectionProbeComponent::SetFalloff(float fFalloff)
+{
+  m_fFalloff = ezMath::Clamp(fFalloff, ezMath::DefaultEpsilon<float>(), 1.0f);
+}
+
 void ezSphereReflectionProbeComponent::OnActivated()
 {
   m_Id = ezReflectionPool::RegisterReflectionProbe(GetWorld(), m_desc, this);
@@ -314,6 +322,8 @@ void ezSphereReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRender
   ezDebugRenderer::Draw3DText(GetWorld(), s, pRenderData->m_GlobalTransform.m_vPosition, ezColor::Wheat);
 
   pRenderData->m_vHalfExtents = ezVec3(m_fRadius);
+  pRenderData->m_vPositiveFalloff = ezVec3(m_fFalloff);
+  pRenderData->m_vNegativeFalloff = ezVec3(m_fFalloff);
   pRenderData->m_Id = m_Id;
   pRenderData->m_uiIndex = REFLECTION_PROBE_IS_SPHERE;
   ezReflectionPool::ExtractReflectionProbe(this, msg, pRenderData, GetWorld(), m_Id, fPriority); 
@@ -346,6 +356,18 @@ void ezBoxReflectionProbeComponent::SetExtents(const ezVec3& extents)
 {
   m_vExtents = extents;
   m_bStatesDirty = true;
+}
+
+void ezBoxReflectionProbeComponent::SetPositiveFalloff(const ezVec3& vFalloff)
+{
+  // Does not affect cube generation so m_bStatesDirty is not set.
+  m_vPositiveFalloff = vFalloff.CompClamp(ezVec3(ezMath::DefaultEpsilon<float>()), ezVec3(1.0f));
+}
+
+void ezBoxReflectionProbeComponent::SetNegativeFalloff(const ezVec3& vFalloff)
+{
+  // Does not affect cube generation so m_bStatesDirty is not set.
+  m_vNegativeFalloff = vFalloff.CompClamp(ezVec3(ezMath::DefaultEpsilon<float>()), ezVec3(1.0f));
 }
 
 const ezVec3& ezBoxReflectionProbeComponent::GetExtents() const
@@ -413,6 +435,8 @@ void ezBoxReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRenderDat
   ezDebugRenderer::Draw3DText(GetWorld(), s, pRenderData->m_GlobalTransform.m_vPosition, ezColor::Wheat);
 
   pRenderData->m_vHalfExtents = m_vExtents / 2.0f;
+  pRenderData->m_vPositiveFalloff = m_vPositiveFalloff;
+  pRenderData->m_vNegativeFalloff = m_vNegativeFalloff;
   pRenderData->m_Id = m_Id;
   pRenderData->m_uiIndex = 0;
   ezReflectionPool::ExtractReflectionProbe(this, msg, pRenderData, GetWorld(), m_Id, fPriority);

@@ -60,6 +60,9 @@ public:
     return m_hCubeMap;
   }
 
+  void SetFarPlane(float fFarPlane);                      // [ property ]
+  float GetFarPlane() const { return m_fFarPlane; } // [ property ]
+
 protected:
   void OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg);
   void OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const;
@@ -68,7 +71,7 @@ protected:
   ezTextureCubeResourceHandle m_hCubeMap;
 
   ezReflectionProbeId m_Id;
+  float m_fFarPlane = 1000.0f;
 
-  // Tracks if any changes where made to the settings. Reset ezReflectionPool::ExtractReflectionProbe once a filter pass is done.
   mutable bool m_bStatesDirty = true;
 };

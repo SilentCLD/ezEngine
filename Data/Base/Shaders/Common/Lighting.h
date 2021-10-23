@@ -345,9 +345,12 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
     if (bIsSphere)
     {
       // boundary clamp.
-      float dist = dot(probePosition, probePosition);
+      float dist = length(probePosition);
       if (dist > 1.0f)
         continue;
+
+      // Compute falloff alpha
+      float alpha = saturate((1.0f - dist) / probeData.PositiveFalloff.x);
 
       // Rotate ray into probe space.
       float3 reflectionDir = CubeMapDirection(mul(WorldToProbeCubeMapNormalMatrix, ReflDirectionWS));
@@ -355,7 +358,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       // Sample the cube map
       float4 coord = float4(reflectionDir, index);
       float mipLevel = MipLevelFromRoughness(matData.roughness, NUM_REFLECTION_MIPS);
-      indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba;
+      indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba * alpha;
     }
     else
     {
@@ -375,14 +378,24 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       float3 PositionLS = probePosition;
 
       float3 Unitary = float3(1.0f, 1.0f, 1.0f);
-      float3 FirstPlaneIntersect  = (Unitary - PositionLS) / RayLS;
-      float3 SecondPlaneIntersect = (-Unitary - PositionLS) / RayLS;
+      float3 FirstPlaneDist  = (Unitary - PositionLS);
+      float3 SecondPlaneDist = (Unitary + PositionLS);
+
+      float3 FirstPlaneIntersect  = FirstPlaneDist / RayLS;
+      float3 SecondPlaneIntersect = -SecondPlaneDist / RayLS;
       float3 FurthestPlane = max(FirstPlaneIntersect, SecondPlaneIntersect);
       float Distance = min(FurthestPlane.x, min(FurthestPlane.y, FurthestPlane.z));
 
       // Use Distance in WS directly to recover intersection
       float3 IntersectPositionWS = PositionWS + ReflDirectionWS * Distance;
         
+      // Compute falloff alpha
+      float3 positiveFalloff = FirstPlaneDist / probeData.PositiveFalloff.xyz;
+      float3 negativeFalloff = SecondPlaneDist / probeData.NegativeFalloff.xyz;
+      float alpha = saturate(min(
+          min(negativeFalloff.x, min(negativeFalloff.y, negativeFalloff.z)),
+          min(positiveFalloff.x, min(positiveFalloff.y, positiveFalloff.z))));
+
       // The blob post above assumes that the cube maps are always rendered from world space without any rotation
       // in the rendering of the cube map itself. However, we do rotate the rendering of the cube maps so we can
       // correctly clamp the far plane for each side of the cube. Thus, we can't take the world space dir and use
@@ -396,7 +409,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       float4 coord = float4(reflectionDir, index);
       roughness = computeDistanceBaseRoughness(length(IntersectPositionWS - matData.worldPosition), length(IntersectPositionWS - CubemapPositionWS), matData.roughness);
       float mipLevel = MipLevelFromRoughness(roughness, NUM_REFLECTION_MIPS);
-      indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba;
+      indirectLight = ReflectionSpecularTexture.SampleLevel(LinearSampler, coord, mipLevel).rgba * alpha;
     }
 
     // Accumulate contribution.

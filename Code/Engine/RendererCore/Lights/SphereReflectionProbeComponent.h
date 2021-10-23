@@ -48,6 +48,8 @@ public:
   ezReflectionProbeId m_Id;
   ezUInt32 m_uiIndex = 0;
   ezVec3 m_vHalfExtents;
+  ezVec3 m_vPositiveFalloff;
+  ezVec3 m_vNegativeFalloff;
 };
 
 struct EZ_RENDERERCORE_DLL ezReflectionProbeDesc
@@ -104,7 +106,7 @@ protected:
   ezReflectionProbeDesc m_desc;
 
   ezReflectionProbeId m_Id;
-  // Tracks if any changes where made to the settings. Reset ezReflectionPool::ExtractReflectionProbe once a filter pass is done.
+  // Set to true if a change was made that requires recomputing the cube map.
   mutable bool m_bStatesDirty = true;
 };
 
@@ -137,6 +139,8 @@ public:
   void SetRadius(float fRadius); // [ property ]
   float GetRadius() const;       // [ property ]
 
+  void SetFalloff(float fFalloff);                // [ property ]
+  float GetFalloff() const { return m_fFalloff; } // [ property ]
 
 protected:
   //////////////////////////////////////////////////////////////////////////
@@ -148,6 +152,7 @@ protected:
   void OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const;
 
   float m_fRadius = 5.0f;
+  float m_fFalloff = 0.1f;
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -176,8 +181,14 @@ public:
   ezBoxReflectionProbeComponent();
   ~ezBoxReflectionProbeComponent();
 
-  const ezVec3& GetExtents() const;
-  void SetExtents(const ezVec3& extents);
+  const ezVec3& GetExtents() const;       // [ property ]
+  void SetExtents(const ezVec3& extents); // [ property ]
+
+  void SetPositiveFalloff(const ezVec3& vFalloff);                        // [ property ]
+  const ezVec3& GetPositiveFalloff() const { return m_vPositiveFalloff; } // [ property ]
+  void SetNegativeFalloff(const ezVec3& vFalloff);                        // [ property ]
+  const ezVec3& GetNegativeFalloff() const { return m_vNegativeFalloff; } // [ property ]
+ 
 
 protected:
   //////////////////////////////////////////////////////////////////////////
@@ -189,4 +200,6 @@ protected:
   void OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const;
 
   ezVec3 m_vExtents = ezVec3(5.0f);
+  ezVec3 m_vPositiveFalloff = ezVec3(0.0f);
+  ezVec3 m_vNegativeFalloff = ezVec3(0.0f);
 };

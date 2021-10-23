@@ -228,6 +228,8 @@ namespace
 
     perReflectionProbeData.ProbePosition = position.GetAsVec4(1.0f); // W isn't used.
     perReflectionProbeData.Scale = scale.GetAsVec4(0.0f); // W isn't used.
+    perReflectionProbeData.PositiveFalloff = pReflectionProbeRenderData->m_vPositiveFalloff.GetAsVec4(0.0f);
+    perReflectionProbeData.NegativeFalloff = pReflectionProbeRenderData->m_vNegativeFalloff.GetAsVec4(0.0f);
     perReflectionProbeData.Index = pReflectionProbeRenderData->m_uiIndex;
   }
 
