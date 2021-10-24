@@ -98,25 +98,6 @@ struct ProbeUpdateInfo
   ezGALTextureHandle m_hCubemapProxies[6];
 };
 
-//////////////////////////////////////////////////////////////////////////
-/// SortedUpdateInfo
-
-struct SortedUpdateInfo
-{
-  EZ_DECLARE_POD_TYPE();
-
-  EZ_ALWAYS_INLINE bool operator<(const SortedUpdateInfo& other) const
-  {
-    if (m_fPriority > other.m_fPriority) // we want to sort descending (higher priority first)
-      return true;
-
-    return m_uiIndex < other.m_uiIndex;
-  }
-
-  ProbeUpdateInfo* m_pUpdateInfo = nullptr;
-  ezUInt32 m_uiIndex = 0;
-  float m_fPriority = 0.0f;
-};
 
 // must not be in anonymous namespace
 template <>
@@ -161,7 +142,7 @@ struct ProbeData
   ezTextureCubeResourceHandle m_hCubeMap; // static data or empty for dynamic.
   ezInt32 m_uiReflectionIndex = -1;
   float m_fPriority = 0.0f;
-  ezInt32 m_uiIndexInUpdateQueue = -1;
+  ProbeUpdateInfo* m_pActiveUpdate = nullptr;
 };
 
 //////////////////////////////////////////////////////////////////////////
@@ -179,6 +160,7 @@ struct ezReflectionPool::Data
     {
       m_MappedCubes.SetCount(s_uiNumReflectionProbeCubeMaps);
     }
+    EZ_DISALLOW_COPY_AND_ASSIGN(WorldReflectionData);
 
     ezIdTable<ezReflectionProbeId, ProbeData> m_Probes;
     ezReflectionProbeId m_SkyLight; // SkyLight is always fixed at reflectionIndex 0.
@@ -204,18 +186,19 @@ struct ezReflectionPool::Data
   void MapProbe(const ezUInt32 uiWorldIndex, ezReflectionPool::Data::WorldReflectionData& data, ezReflectionProbeId id, ezInt32 iReflectionIndex);
   void UnmapProbe(const ezUInt32 uiWorldIndex, ezReflectionPool::Data::WorldReflectionData& data, ezReflectionProbeId id);
 
-  // Dynamic Update Queue (all worlds combined)
   void PreExtraction();
   void PostExtraction();
   void GenerateUpdateSteps();
+  void ResetProbeUpdateInfo(ProbeUpdateInfo* pInfo);
 
+  // Dynamic Update Queue (all worlds combined)
   ezHashSet<DynamicUpdate> m_PendingDynamicUpdate;
   ezDeque<DynamicUpdate> m_DynamicUpdateQueue;
 
   // Active Dynamic Updates
   ezDynamicArray<ReflectionView> m_RenderViews;
   ezDynamicArray<ReflectionView> m_FilterViews;
-  ezHybridArray<ProbeUpdateInfo, 2> m_DynamicUpdates;
+  ezDynamicArray<ezUniquePtr<ProbeUpdateInfo>> m_DynamicUpdates;
 
   void CreateWorldReflectionData(ezReflectionPool::Data::WorldReflectionData& data);
   void DestroyWorldReflectionData(ezReflectionPool::Data::WorldReflectionData& data);
@@ -226,7 +209,7 @@ struct ezReflectionPool::Data
   ezMutex m_Mutex;
   ezUInt64 m_uiWorldHasSkyLight = 0;
   ezUInt64 m_uiSkyIrradianceChanged = 0;
-  ezHybridArray<WorldReflectionData, 64> m_WorldReflectionData;
+  ezHybridArray<ezUniquePtr<WorldReflectionData>, 2> m_WorldReflectionData;
 
   // GPU storage
   ezGALTextureHandle m_hFallbackReflectionSpecularTexture;
@@ -237,3 +220,4 @@ struct ezReflectionPool::Data
   ezMeshResourceHandle m_hDebugSphere;
   ezHybridArray<ezMaterialResourceHandle, 6 * s_uiNumReflectionProbeCubeMaps> m_hDebugMaterial;
 };
+

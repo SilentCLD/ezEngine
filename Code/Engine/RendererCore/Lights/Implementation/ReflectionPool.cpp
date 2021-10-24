@@ -139,8 +139,8 @@ ezReflectionPool::Data::~Data()
   ezUInt32 uiWorldReflectionCount = m_WorldReflectionData.GetCount();
   for (ezUInt32 i = 0; i < uiWorldReflectionCount; ++i)
   {
-    WorldReflectionData& reflectionData = m_WorldReflectionData[i];
-    EZ_ASSERT_DEV(reflectionData.m_uiRegisteredProbeCount == 0, "Not all probes were deregistered.");
+    WorldReflectionData* pData = m_WorldReflectionData[i].Borrow();
+    EZ_ASSERT_DEV(!pData || pData->m_uiRegisteredProbeCount == 0, "Not all probes were deregistered.");
   }
   m_WorldReflectionData.Clear();
 
@@ -183,7 +183,7 @@ void ezReflectionPool::Data::GenerateUpdateSteps()
   ezUInt32 uiSortedUpdateInfoIndex = 0;
   while (uiSortedUpdateInfoIndex < m_DynamicUpdates.GetCount())
   {
-    auto pUpdateInfo = &m_DynamicUpdates[uiSortedUpdateInfoIndex];
+    auto pUpdateInfo = m_DynamicUpdates[uiSortedUpdateInfoIndex].Borrow();
     if (!pUpdateInfo->m_bInUse)
     {
       ++uiSortedUpdateInfoIndex;
@@ -235,6 +235,23 @@ void ezReflectionPool::Data::GenerateUpdateSteps()
     if (bNextProbe)
     {
       ++uiSortedUpdateInfoIndex;
+    }
+  }
+}
+
+void ezReflectionPool::Data::ResetProbeUpdateInfo(ProbeUpdateInfo* pInfo)
+{
+  // Reset and move to the end of the queue.
+  pInfo->Reset();
+  const ezUInt32 uiCount = m_DynamicUpdates.GetCount();
+  for (ezUInt32 i = 0; i < uiCount; i++)
+  {
+    if (m_DynamicUpdates[i] == pInfo)
+    {
+      ezUniquePtr<ProbeUpdateInfo> info = std::move(m_DynamicUpdates[i]);
+      m_DynamicUpdates.RemoveAtAndCopy(i);
+      m_DynamicUpdates.PushBack(std::move(info));
+      return;
     }
   }
 }
@@ -309,7 +326,10 @@ void ezReflectionPool::Data::CreateReflectionViewsAndResources()
 
   if (m_DynamicUpdates.IsEmpty())
   {
-    m_DynamicUpdates.SetCount(1);
+    for (ezUInt32 i = 0; i < 2; i++)
+    {
+      m_DynamicUpdates.PushBack(EZ_DEFAULT_NEW(ProbeUpdateInfo));
+    }
   }
 
   if (m_hFallbackReflectionSpecularTexture.IsInvalidated())
@@ -480,7 +500,7 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
     if (step.m_UpdateStep == UpdateStep::Filter)
     {
       const ezUInt32 uiWorldIndex = pWorld->GetIndex();
-      renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(m_WorldReflectionData[uiWorldIndex].m_hReflectionSpecularTexture));
+      renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(m_WorldReflectionData[uiWorldIndex]->m_hReflectionSpecularTexture));
 
       ezUInt32 bla = 2;
       if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
@@ -496,7 +516,11 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
       if (probeData.m_desc.m_Mode == ezReflectionProbeMode::Static)
       {
         ezResourceLock<ezTextureCubeResource> pTexture(probeData.m_hCubeMap, ezResourceAcquireMode::BlockTillLoaded);
-        hSourceTexture = pTexture->GetGALTexture();
+        //#TODO Currently even in static mode we render the 6 sides and only change the filter stage to point to the static texture if available. Rendering the 6 sides is intended only in the editor as a preview for non-baked probes. We will need to find a way to quickly determine if we need to do this fallback at a much earlier stage.
+        if (pTexture->GetLoadingState() == ezResourceState::Loaded && pTexture->GetResourceHandle() == probeData.m_hCubeMap)
+        {
+          hSourceTexture = pTexture->GetGALTexture();
+        }
       }
       pView->SetRenderPassProperty("ReflectionFilterPass", "InputCubemap", hSourceTexture.GetInternalID().m_Data);
     }
@@ -656,8 +680,9 @@ ezGALTextureHandle ezReflectionPool::GetReflectionSpecularTexture(ezUInt32 uiWor
 {
   if (uiWorldIndex < s_pData->m_WorldReflectionData.GetCount())
   {
-    if (s_pData->m_WorldReflectionData[uiWorldIndex].m_uiRegisteredProbeCount > 0)
-      return s_pData->m_WorldReflectionData[uiWorldIndex].m_hReflectionSpecularTexture;
+    Data::WorldReflectionData* pData = s_pData->m_WorldReflectionData[uiWorldIndex].Borrow();
+    if (pData)
+      return pData->m_hReflectionSpecularTexture;
   }
   return s_pData->m_hFallbackReflectionSpecularTexture;
 }
