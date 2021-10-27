@@ -116,6 +116,9 @@ struct EZ_ALIGN_16(ezPerReflectionProbeData)
     FLOAT4(PositiveFalloff);
     FLOAT4(NegativeFalloff);
     UINT1(Index);
+    UINT1(Padding1);
+    UINT1(Padding2);
+    UINT1(Padding3);
   };
 
 #if EZ_ENABLED(PLATFORM_SHADER)

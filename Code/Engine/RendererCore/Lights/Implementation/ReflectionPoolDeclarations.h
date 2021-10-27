@@ -1,3 +1,5 @@
+#pragma once
+
 #include <Core/World/World.h>
 #include <Foundation/Types/Bitflags.h>
 #include <RendererCore/Lights/Implementation/ReflectionPool.h>

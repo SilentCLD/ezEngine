@@ -12,10 +12,11 @@
 #include <../../Data/Base/Shaders/Common/LightData.h>
 #include <RendererCore/Debug/DebugRenderer.h>
 #include <Foundation/Serialization/AbstractObjectGraph.h>
+#include <Core/Messages/TransformChangedMessage.h>
 
 namespace
 {
-  static ezVariantArray GetDefaultTags()
+  static ezVariantArray GetDefaultProbeTags()
   {
     ezVariantArray value(ezStaticAllocatorWrapper::GetAllocator());
     value.PushBack(ezStringView("CastShadows"));
@@ -34,7 +35,7 @@ EZ_BEGIN_DYNAMIC_REFLECTED_TYPE(ezReflectionProbeComponent, 2, ezRTTINoAllocator
     EZ_ENUM_ACCESSOR_PROPERTY("ReflectionProbeMode", ezReflectionProbeMode, GetReflectionProbeMode, SetReflectionProbeMode)->AddAttributes(new ezDefaultValueAttribute(ezReflectionProbeMode::Static), new ezGroupAttribute("Description")),
     EZ_ACCESSOR_PROPERTY("Intensity", GetIntensity, SetIntensity)->AddAttributes(new ezClampValueAttribute(0.0f, ezVariant()), new ezDefaultValueAttribute(1.0f)),
     EZ_ACCESSOR_PROPERTY("Saturation", GetSaturation, SetSaturation)->AddAttributes(new ezClampValueAttribute(0.0f, ezVariant()), new ezDefaultValueAttribute(1.0f)),
-    EZ_SET_ACCESSOR_PROPERTY("IncludeTags", GetIncludeTags, InsertIncludeTag, RemoveIncludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default"), new ezDefaultValueAttribute(GetDefaultTags())),
+    EZ_SET_ACCESSOR_PROPERTY("IncludeTags", GetIncludeTags, InsertIncludeTag, RemoveIncludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default"), new ezDefaultValueAttribute(GetDefaultProbeTags())),
     EZ_SET_ACCESSOR_PROPERTY("ExcludeTags", GetExcludeTags, InsertExcludeTag, RemoveExcludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default")),
     EZ_ACCESSOR_PROPERTY("ShowDebugInfo", GetShowDebugInfo, SetShowDebugInfo),
   }

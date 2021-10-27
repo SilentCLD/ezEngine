@@ -9,6 +9,7 @@
 #include <RendererCore/Pipeline/View.h>
 #include <RendererCore/RenderWorld/RenderWorld.h>
 #include <RendererCore/Textures/TextureCubeResource.h>
+#include <Foundation/Serialization/AbstractObjectGraph.h>
 
 namespace
 {
