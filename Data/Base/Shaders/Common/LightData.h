@@ -115,6 +115,8 @@ struct EZ_ALIGN_16(ezPerReflectionProbeData)
     FLOAT4(ProbePosition); //16 Global probe position and unused
     FLOAT4(PositiveFalloff);
     FLOAT4(NegativeFalloff);
+    FLOAT4(InfluenceScale);
+    FLOAT4(InfluenceShift);
     UINT1(Index);
     UINT1(Padding1);
     UINT1(Padding2);
@@ -125,7 +127,7 @@ struct EZ_ALIGN_16(ezPerReflectionProbeData)
   StructuredBuffer<ezPerReflectionProbeData> perPerReflectionProbeDataBuffer;
 #else // C++
   //char (*__kaboom)[sizeof(ezPerReflectionProbeData)] = 1;
-  EZ_CHECK_AT_COMPILETIME(sizeof(ezPerReflectionProbeData) == 128);
+  EZ_CHECK_AT_COMPILETIME(sizeof(ezPerReflectionProbeData) == 160);
 #endif
 
 CONSTANT_BUFFER(ezClusteredDataConstants, 3)

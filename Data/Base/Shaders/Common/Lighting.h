@@ -362,11 +362,16 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
     }
     else
     {
+      float3 pos2 = probePosition;
+      pos2 -= probeData.InfluenceShift;
+      pos2 /= probeData.InfluenceScale;
       // boundary clamp.
-      float3 Dist = abs(probePosition);//, -probePosition);
+      float3 Dist = abs(pos2);
       float maxDist = max(Dist.x, max(Dist.y, Dist.z));
       if (maxDist > 1.0f)
          continue;
+
+      const float3 Unitary = float3(1.0f, 1.0f, 1.0f);
 
       // Box projection.
       // taken from: https://seblagarde.wordpress.com/2012/09/29/image-based-lighting-approaches-and-parallax-corrected-cubemap/
@@ -376,8 +381,7 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       // Transform in local unit parallax cube space (scaled and rotated)
       float3 RayLS = mul(worldToProbeNormalMatrix, ReflDirectionWS);
       float3 PositionLS = probePosition;
-
-      float3 Unitary = float3(1.0f, 1.0f, 1.0f);
+ 
       float3 FirstPlaneDist  = (Unitary - PositionLS);
       float3 SecondPlaneDist = (Unitary + PositionLS);
 
@@ -390,12 +394,18 @@ float3 ComputeReflection(inout ezMaterialData matData, float3 viewVector, ezPerC
       float3 IntersectPositionWS = PositionWS + ReflDirectionWS * Distance;
         
       // Compute falloff alpha
-      float3 positiveFalloff = FirstPlaneDist / probeData.PositiveFalloff.xyz;
-      float3 negativeFalloff = SecondPlaneDist / probeData.NegativeFalloff.xyz;
-      float alpha = saturate(min(
-          min(negativeFalloff.x, min(negativeFalloff.y, negativeFalloff.z)),
-          min(positiveFalloff.x, min(positiveFalloff.y, positiveFalloff.z))));
+      float alpha = 0.0f;
+      {
+        float3 FirstPlaneDist  = (Unitary - pos2);
+        float3 SecondPlaneDist = (Unitary + pos2);
 
+        float3 positiveFalloff = FirstPlaneDist / probeData.PositiveFalloff.xyz;
+        float3 negativeFalloff = SecondPlaneDist / probeData.NegativeFalloff.xyz;
+        alpha = saturate(min(
+            min(negativeFalloff.x, min(negativeFalloff.y, negativeFalloff.z)),
+            min(positiveFalloff.x, min(positiveFalloff.y, positiveFalloff.z))));
+      }
+      //return alpha;
       // The blob post above assumes that the cube maps are always rendered from world space without any rotation
       // in the rendering of the cube map itself. However, we do rotate the rendering of the cube maps so we can
       // correctly clamp the far plane for each side of the cube. Thus, we can't take the world space dir and use

@@ -226,8 +226,12 @@ namespace
 
     perReflectionProbeData.worldToProbeMatrix = inverse;
 
-    perReflectionProbeData.ProbePosition = position.GetAsVec4(1.0f); // W isn't used.
+    perReflectionProbeData.ProbePosition = pReflectionProbeRenderData->m_vProbePosition.GetAsVec4(1.0f); // W isn't used.
     perReflectionProbeData.Scale = scale.GetAsVec4(0.0f); // W isn't used.
+
+    perReflectionProbeData.InfluenceScale = pReflectionProbeRenderData->m_vInfluenceScale.GetAsVec4(0.0f);
+    perReflectionProbeData.InfluenceShift = pReflectionProbeRenderData->m_vInfluenceShift.CompMul(ezVec3(1.0f) - pReflectionProbeRenderData->m_vInfluenceScale).GetAsVec4(0.0f);
+
     perReflectionProbeData.PositiveFalloff = pReflectionProbeRenderData->m_vPositiveFalloff.GetAsVec4(0.0f);
     perReflectionProbeData.NegativeFalloff = pReflectionProbeRenderData->m_vNegativeFalloff.GetAsVec4(0.0f);
     perReflectionProbeData.Index = pReflectionProbeRenderData->m_uiIndex;

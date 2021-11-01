@@ -7,6 +7,7 @@
 
 struct ezMsgUpdateLocalBounds;
 struct ezMsgExtractRenderData;
+struct ezMsgTransformChanged;
 class ezAbstractObjectNode;
 
   /// @brief
@@ -47,9 +48,12 @@ public:
 
   ezReflectionProbeId m_Id;
   ezUInt32 m_uiIndex = 0;
+  ezVec3 m_vProbePosition; ///< Probe position in world space.
   ezVec3 m_vHalfExtents;
   ezVec3 m_vPositiveFalloff;
   ezVec3 m_vNegativeFalloff;
+  ezVec3 m_vInfluenceScale;
+  ezVec3 m_vInfluenceShift;
 };
 
 struct EZ_RENDERERCORE_DLL ezReflectionProbeDesc
@@ -64,6 +68,9 @@ struct EZ_RENDERERCORE_DLL ezReflectionProbeDesc
   bool m_bShowDebugInfo = false;
   float m_fIntensity = 1.0f;
   float m_fSaturation = 1.0f;
+  float m_fNearPlane = 0.0f;
+  float m_fFarPlane = 100.0f;
+  ezVec3 m_vCaptureOffset = ezVec3::ZeroVector();
 };
 
 /// @brief
@@ -78,12 +85,6 @@ public:
   void SetReflectionProbeMode(ezEnum<ezReflectionProbeMode> mode); // [ property ]
   ezEnum<ezReflectionProbeMode> GetReflectionProbeMode() const;    // [ property ]
 
-  void SetIntensity(float fIntensity); // [ property ]
-  float GetIntensity() const;          // [ property ]
-
-  void SetSaturation(float fSaturation); // [ property ]
-  float GetSaturation() const;           // [ property ]
-
   const ezTagSet& GetIncludeTags() const;   // [ property ]
   void InsertIncludeTag(const char* szTag); // [ property ]
   void RemoveIncludeTag(const char* szTag); // [ property ]
@@ -91,6 +92,15 @@ public:
   const ezTagSet& GetExcludeTags() const;   // [ property ]
   void InsertExcludeTag(const char* szTag); // [ property ]
   void RemoveExcludeTag(const char* szTag); // [ property ]
+
+  float GetNearPlane() const { return m_desc.m_fNearPlane; } // [ property ]
+  void SetNearPlane(float fNearPlane);                       // [ property ]
+
+  float GetFarPlane() const { return m_desc.m_fFarPlane; } // [ property ]
+  void SetFarPlane(float fFarPlane);                      // [ property ]
+
+  const ezVec3& GetCaptureOffset() const { return m_desc.m_vCaptureOffset; } // [ property ]
+  void SetCaptureOffset(const ezVec3& vOffset);                  // [ property ]
 
   void SetShowDebugInfo(bool bShowDebugInfo); // [ property ]
   bool GetShowDebugInfo() const;              // [ property ]
@@ -150,7 +160,7 @@ protected:
 protected:
   void OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg);
   void OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const;
-
+  void OnTransformChanged(ezMsgTransformChanged& msg);
   float m_fRadius = 5.0f;
   float m_fFalloff = 0.1f;
 };
@@ -184,6 +194,11 @@ public:
   const ezVec3& GetExtents() const;       // [ property ]
   void SetExtents(const ezVec3& extents); // [ property ]
 
+  const ezVec3& GetInfluenceScale() const;       // [ property ]
+  void SetInfluenceScale(const ezVec3& vInfluenceScale); // [ property ]
+  const ezVec3& GetInfluenceShift() const;       // [ property ]
+  void SetInfluenceShift(const ezVec3& vInfluenceShift); // [ property ]
+
   void SetPositiveFalloff(const ezVec3& vFalloff);                        // [ property ]
   const ezVec3& GetPositiveFalloff() const { return m_vPositiveFalloff; } // [ property ]
   void SetNegativeFalloff(const ezVec3& vFalloff);                        // [ property ]
@@ -198,8 +213,11 @@ protected:
 protected:
   void OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg);
   void OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const;
+  void OnTransformChanged(ezMsgTransformChanged& msg);
 
   ezVec3 m_vExtents = ezVec3(5.0f);
+  ezVec3 m_vInfluenceScale = ezVec3(1.0f);
+  ezVec3 m_vInfluenceShift = ezVec3(0.5f);
   ezVec3 m_vPositiveFalloff = ezVec3(0.0f);
   ezVec3 m_vNegativeFalloff = ezVec3(0.0f);
 };

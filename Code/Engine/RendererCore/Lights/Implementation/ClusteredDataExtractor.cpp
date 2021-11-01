@@ -330,7 +330,8 @@ void ezClusteredDataExtractor::PostSortAndBatch(
 
         if (auto pReflectionProbeRenderData = ezDynamicCast<const ezReflectionProbeRenderData*>(it))
         {
-          FillReflectionProbeData(m_TempReflectionProbeData.ExpandAndGetRef(), pReflectionProbeRenderData);
+          auto& probeData = m_TempReflectionProbeData.ExpandAndGetRef();
+          FillReflectionProbeData(probeData, pReflectionProbeRenderData);
 
           if (pReflectionProbeRenderData->m_uiIndex & REFLECTION_PROBE_IS_SPHERE)
           {
@@ -341,10 +342,15 @@ void ezClusteredDataExtractor::PostSortAndBatch(
           }
           else
           {
-            ezTransform aaa = pReflectionProbeRenderData->m_GlobalTransform;
-            aaa.m_vScale = aaa.m_vScale.CompMul(pReflectionProbeRenderData->m_vHalfExtents);
+            ezTransform transform = pReflectionProbeRenderData->m_GlobalTransform;
+            const ezVec3 vFullScale = transform.m_vScale.CompMul(pReflectionProbeRenderData->m_vHalfExtents);
+            transform.m_vScale = vFullScale.CompMul(probeData.InfluenceScale.GetAsVec3());
+            transform.m_vPosition += transform.m_qRotation * vFullScale.CompMul(probeData.InfluenceShift.GetAsVec3());
 
-            RasterizeDecal(aaa, uiProbeIndex, viewProjectionMatrix, m_TempReflectionProbeClusters.GetData(), m_ClusterBoundingSpheres.GetData());
+            //const ezBoundingBox aabb(ezVec3(-1.0f), ezVec3(1.0f));
+            //ezDebugRenderer::DrawLineBox(view.GetHandle(), aabb, ezColor::DarkBlue, transform);
+
+            RasterizeDecal(transform, uiProbeIndex, viewProjectionMatrix, m_TempReflectionProbeClusters.GetData(), m_ClusterBoundingSpheres.GetData());
           }
         }
         else

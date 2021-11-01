@@ -14,16 +14,6 @@
 #include <Foundation/Serialization/AbstractObjectGraph.h>
 #include <Core/Messages/TransformChangedMessage.h>
 
-namespace
-{
-  static ezVariantArray GetDefaultProbeTags()
-  {
-    ezVariantArray value(ezStaticAllocatorWrapper::GetAllocator());
-    value.PushBack(ezStringView("CastShadows"));
-    return value;
-  }
-} // namespace
-
 // clang-format off
 EZ_BEGIN_DYNAMIC_REFLECTED_TYPE(ezReflectionProbeRenderData, 1, ezRTTIDefaultAllocator<ezReflectionProbeRenderData>)
 EZ_END_DYNAMIC_REFLECTED_TYPE;
@@ -33,17 +23,23 @@ EZ_BEGIN_DYNAMIC_REFLECTED_TYPE(ezReflectionProbeComponent, 2, ezRTTINoAllocator
   EZ_BEGIN_PROPERTIES
   {
     EZ_ENUM_ACCESSOR_PROPERTY("ReflectionProbeMode", ezReflectionProbeMode, GetReflectionProbeMode, SetReflectionProbeMode)->AddAttributes(new ezDefaultValueAttribute(ezReflectionProbeMode::Static), new ezGroupAttribute("Description")),
-    EZ_ACCESSOR_PROPERTY("Intensity", GetIntensity, SetIntensity)->AddAttributes(new ezClampValueAttribute(0.0f, ezVariant()), new ezDefaultValueAttribute(1.0f)),
-    EZ_ACCESSOR_PROPERTY("Saturation", GetSaturation, SetSaturation)->AddAttributes(new ezClampValueAttribute(0.0f, ezVariant()), new ezDefaultValueAttribute(1.0f)),
-    EZ_SET_ACCESSOR_PROPERTY("IncludeTags", GetIncludeTags, InsertIncludeTag, RemoveIncludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default"), new ezDefaultValueAttribute(GetDefaultProbeTags())),
+    EZ_SET_ACCESSOR_PROPERTY("IncludeTags", GetIncludeTags, InsertIncludeTag, RemoveIncludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default")),
     EZ_SET_ACCESSOR_PROPERTY("ExcludeTags", GetExcludeTags, InsertExcludeTag, RemoveExcludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default")),
+    EZ_ACCESSOR_PROPERTY("NearPlane", GetNearPlane, SetNearPlane)->AddAttributes(new ezDefaultValueAttribute(0.0f), new ezClampValueAttribute(0.0f, {}), new ezMinValueTextAttribute("Auto")),
+    EZ_ACCESSOR_PROPERTY("FarPlane", GetFarPlane, SetFarPlane)->AddAttributes(new ezDefaultValueAttribute(100.0f), new ezClampValueAttribute(0.01f, 10000.0f)),
+    EZ_ACCESSOR_PROPERTY("CaptureOffset", GetCaptureOffset, SetCaptureOffset),
     EZ_ACCESSOR_PROPERTY("ShowDebugInfo", GetShowDebugInfo, SetShowDebugInfo),
   }
   EZ_END_PROPERTIES;
+  EZ_BEGIN_ATTRIBUTES
+  {
+    new ezTransformManipulatorAttribute("CaptureOffset"),
+  }
+  EZ_END_ATTRIBUTES;
 }
 EZ_END_DYNAMIC_REFLECTED_TYPE;
 
-EZ_BEGIN_COMPONENT_TYPE(ezSphereReflectionProbeComponent, 1, ezComponentMode::Dynamic)
+EZ_BEGIN_COMPONENT_TYPE(ezSphereReflectionProbeComponent, 1, ezComponentMode::Static)
 {
   EZ_BEGIN_PROPERTIES
   {
@@ -60,6 +56,7 @@ EZ_BEGIN_COMPONENT_TYPE(ezSphereReflectionProbeComponent, 1, ezComponentMode::Dy
   {
     EZ_MESSAGE_HANDLER(ezMsgUpdateLocalBounds, OnUpdateLocalBounds),
     EZ_MESSAGE_HANDLER(ezMsgExtractRenderData, OnMsgExtractRenderData),
+    EZ_MESSAGE_HANDLER(ezMsgTransformChanged, OnTransformChanged),
   }
   EZ_END_MESSAGEHANDLERS;
   EZ_BEGIN_ATTRIBUTES
@@ -73,11 +70,13 @@ EZ_BEGIN_COMPONENT_TYPE(ezSphereReflectionProbeComponent, 1, ezComponentMode::Dy
 EZ_END_COMPONENT_TYPE
 
 
-EZ_BEGIN_COMPONENT_TYPE(ezBoxReflectionProbeComponent, 1, ezComponentMode::Dynamic)
+EZ_BEGIN_COMPONENT_TYPE(ezBoxReflectionProbeComponent, 1, ezComponentMode::Static)
 {
   EZ_BEGIN_PROPERTIES
   {
     EZ_ACCESSOR_PROPERTY("Extents", GetExtents, SetExtents)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), {}), new ezDefaultValueAttribute(ezVec3(5.0f))),
+    EZ_ACCESSOR_PROPERTY("InfluenceScale", GetInfluenceScale, SetInfluenceScale)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), ezVec3(1.0f)), new ezDefaultValueAttribute(ezVec3(1.0f))),
+    EZ_ACCESSOR_PROPERTY("InfluenceShift", GetInfluenceShift, SetInfluenceShift)->AddAttributes(new ezClampValueAttribute(ezVec3(-1.0f), ezVec3(1.0f)), new ezDefaultValueAttribute(ezVec3(0.0f))),
     EZ_ACCESSOR_PROPERTY("PositiveFalloff", GetPositiveFalloff, SetPositiveFalloff)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), ezVec3(1.0f)), new ezDefaultValueAttribute(ezVec3(0.1f))),
     EZ_ACCESSOR_PROPERTY("NegativeFalloff", GetNegativeFalloff, SetNegativeFalloff)->AddAttributes(new ezClampValueAttribute(ezVec3(0.0f), ezVec3(1.0f)), new ezDefaultValueAttribute(ezVec3(0.1f))),
   }
@@ -91,6 +90,7 @@ EZ_BEGIN_COMPONENT_TYPE(ezBoxReflectionProbeComponent, 1, ezComponentMode::Dynam
   {
     EZ_MESSAGE_HANDLER(ezMsgUpdateLocalBounds, OnUpdateLocalBounds),
     EZ_MESSAGE_HANDLER(ezMsgExtractRenderData, OnMsgExtractRenderData),
+    EZ_MESSAGE_HANDLER(ezMsgTransformChanged, OnTransformChanged),
   }
   EZ_END_MESSAGEHANDLERS;
   EZ_BEGIN_ATTRIBUTES
@@ -144,28 +144,6 @@ ezEnum<ezReflectionProbeMode> ezReflectionProbeComponent::GetReflectionProbeMode
   return m_desc.m_Mode;
 }
 
-void ezReflectionProbeComponent::SetIntensity(float fIntensity)
-{
-  m_desc.m_fIntensity = fIntensity;
-  m_bStatesDirty = true;
-}
-
-float ezReflectionProbeComponent::GetIntensity() const
-{
-  return m_desc.m_fIntensity;
-}
-
-void ezReflectionProbeComponent::SetSaturation(float fSaturation)
-{
-  m_desc.m_fSaturation = fSaturation;
-  m_bStatesDirty = true;
-}
-
-float ezReflectionProbeComponent::GetSaturation() const
-{
-  return m_desc.m_fSaturation;
-}
-
 const ezTagSet& ezReflectionProbeComponent::GetIncludeTags() const
 {
   return m_desc.m_IncludeTags;
@@ -201,6 +179,24 @@ void ezReflectionProbeComponent::RemoveExcludeTag(const char* szTag)
   m_bStatesDirty = true;
 }
 
+void ezReflectionProbeComponent::SetNearPlane(float fNearPlane)
+{
+  m_desc.m_fNearPlane = fNearPlane;
+  m_bStatesDirty = true;
+}
+
+void ezReflectionProbeComponent::SetFarPlane(float fFarPlane)
+{
+  m_desc.m_fFarPlane = fFarPlane;
+  m_bStatesDirty = true;
+}
+
+void ezReflectionProbeComponent::SetCaptureOffset(const ezVec3& vOffset)
+{
+  m_desc.m_vCaptureOffset = vOffset;
+  m_bStatesDirty = true;
+}
+
 void ezReflectionProbeComponent::SetShowDebugInfo(bool bShowDebugInfo)
 {
   m_desc.m_bShowDebugInfo = bShowDebugInfo;
@@ -222,9 +218,10 @@ void ezReflectionProbeComponent::SerializeComponent(ezWorldWriter& stream) const
   m_desc.m_ExcludeTags.Save(s);
   s << m_desc.m_Mode;
   s << m_desc.m_bShowDebugInfo;
-  s << m_desc.m_fIntensity;
-  s << m_desc.m_fSaturation;
   s << m_desc.m_uniqueID;
+  s << m_desc.m_fNearPlane;
+  s << m_desc.m_fFarPlane;
+  s << m_desc.m_vCaptureOffset;
 }
 
 void ezReflectionProbeComponent::DeserializeComponent(ezWorldReader& stream)
@@ -237,9 +234,10 @@ void ezReflectionProbeComponent::DeserializeComponent(ezWorldReader& stream)
   m_desc.m_ExcludeTags.Load(s, ezTagRegistry::GetGlobalRegistry());
   s >> m_desc.m_Mode;
   s >> m_desc.m_bShowDebugInfo;
-  s >> m_desc.m_fIntensity;
-  s >> m_desc.m_fSaturation;
   s >> m_desc.m_uniqueID;
+  s >> m_desc.m_fNearPlane;
+  s >> m_desc.m_fFarPlane;
+  s >> m_desc.m_vCaptureOffset;
 }
 
 //////////////////////////////////////////////////////////////////////////
@@ -265,6 +263,7 @@ void ezSphereReflectionProbeComponent::SetFalloff(float fFalloff)
 
 void ezSphereReflectionProbeComponent::OnActivated()
 {
+  GetOwner()->EnableStaticTransformChangesNotifications();
   m_Id = ezReflectionPool::RegisterReflectionProbe(GetWorld(), m_desc, this);
   GetOwner()->UpdateLocalBounds();
 }
@@ -284,7 +283,7 @@ void ezSphereReflectionProbeComponent::OnObjectCreated(const ezAbstractObjectNod
 
 void ezSphereReflectionProbeComponent::OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg)
 {
-  msg.SetAlwaysVisible(GetOwner()->IsDynamic() ? ezDefaultSpatialDataCategories::RenderDynamic : ezDefaultSpatialDataCategories::RenderStatic);
+  msg.SetAlwaysVisible(ezDefaultSpatialDataCategories::RenderDynamic);
 }
 
 void ezSphereReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const
@@ -323,11 +322,19 @@ void ezSphereReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRender
   ezDebugRenderer::Draw3DText(GetWorld(), s, pRenderData->m_GlobalTransform.m_vPosition, ezColor::Wheat);
 
   pRenderData->m_vHalfExtents = ezVec3(m_fRadius);
+  pRenderData->m_vProbePosition = pRenderData->m_GlobalTransform * m_desc.m_vCaptureOffset;
+  pRenderData->m_vInfluenceScale = ezVec3(1.0f);
+  pRenderData->m_vInfluenceShift = ezVec3(0.5f);
   pRenderData->m_vPositiveFalloff = ezVec3(m_fFalloff);
   pRenderData->m_vNegativeFalloff = ezVec3(m_fFalloff);
   pRenderData->m_Id = m_Id;
   pRenderData->m_uiIndex = REFLECTION_PROBE_IS_SPHERE;
   ezReflectionPool::ExtractReflectionProbe(this, msg, pRenderData, GetWorld(), m_Id, fPriority); 
+}
+
+void ezSphereReflectionProbeComponent::OnTransformChanged(ezMsgTransformChanged& msg)
+{
+  m_bStatesDirty = true;
 }
 
 void ezSphereReflectionProbeComponent::SerializeComponent(ezWorldWriter& stream) const
@@ -356,7 +363,26 @@ ezBoxReflectionProbeComponent::~ezBoxReflectionProbeComponent() = default;
 void ezBoxReflectionProbeComponent::SetExtents(const ezVec3& extents)
 {
   m_vExtents = extents;
-  m_bStatesDirty = true;
+}
+
+const ezVec3& ezBoxReflectionProbeComponent::GetInfluenceScale() const
+{
+  return m_vInfluenceScale;
+}
+
+void ezBoxReflectionProbeComponent::SetInfluenceScale(const ezVec3& vInfluenceScale)
+{
+  m_vInfluenceScale = vInfluenceScale;
+}
+
+const ezVec3& ezBoxReflectionProbeComponent::GetInfluenceShift() const
+{
+  return m_vInfluenceShift;
+}
+
+void ezBoxReflectionProbeComponent::SetInfluenceShift(const ezVec3& vInfluenceShift)
+{
+  m_vInfluenceShift = vInfluenceShift;
 }
 
 void ezBoxReflectionProbeComponent::SetPositiveFalloff(const ezVec3& vFalloff)
@@ -378,6 +404,7 @@ const ezVec3& ezBoxReflectionProbeComponent::GetExtents() const
 
 void ezBoxReflectionProbeComponent::OnActivated()
 {
+  GetOwner()->EnableStaticTransformChangesNotifications();
   m_Id = ezReflectionPool::RegisterReflectionProbe(GetWorld(), m_desc, this);
   GetOwner()->UpdateLocalBounds();
 }
@@ -397,7 +424,7 @@ void ezBoxReflectionProbeComponent::OnObjectCreated(const ezAbstractObjectNode& 
 
 void ezBoxReflectionProbeComponent::OnUpdateLocalBounds(ezMsgUpdateLocalBounds& msg)
 {
-  msg.SetAlwaysVisible(GetOwner()->IsDynamic() ? ezDefaultSpatialDataCategories::RenderDynamic : ezDefaultSpatialDataCategories::RenderStatic);
+  msg.SetAlwaysVisible(ezDefaultSpatialDataCategories::RenderDynamic);
 }
 
 void ezBoxReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRenderData& msg) const
@@ -414,6 +441,7 @@ void ezBoxReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRenderDat
 
   auto pRenderData = ezCreateRenderDataForThisFrame<ezReflectionProbeRenderData>(GetOwner());
   pRenderData->m_GlobalTransform = GetOwner()->GetGlobalTransform();
+  pRenderData->m_vProbePosition = pRenderData->m_GlobalTransform * m_desc.m_vCaptureOffset;
   const ezVec3 vScale = pRenderData->m_GlobalTransform.m_vScale.CompMul(m_vExtents);
   const float fVolume = ezMath::Abs(vScale.x * vScale.y * vScale.z);
   const float fLogVolume = ezMath::Log2(1.0f + fVolume); // +1 to make sure it never goes negative.
@@ -436,11 +464,18 @@ void ezBoxReflectionProbeComponent::OnMsgExtractRenderData(ezMsgExtractRenderDat
   ezDebugRenderer::Draw3DText(GetWorld(), s, pRenderData->m_GlobalTransform.m_vPosition, ezColor::Wheat);
 
   pRenderData->m_vHalfExtents = m_vExtents / 2.0f;
+  pRenderData->m_vInfluenceScale = m_vInfluenceScale;
+  pRenderData->m_vInfluenceShift = m_vInfluenceShift;
   pRenderData->m_vPositiveFalloff = m_vPositiveFalloff;
   pRenderData->m_vNegativeFalloff = m_vNegativeFalloff;
   pRenderData->m_Id = m_Id;
   pRenderData->m_uiIndex = 0;
   ezReflectionPool::ExtractReflectionProbe(this, msg, pRenderData, GetWorld(), m_Id, fPriority);
+}
+
+void ezBoxReflectionProbeComponent::OnTransformChanged(ezMsgTransformChanged& msg)
+{
+  m_bStatesDirty = true;
 }
 
 void ezBoxReflectionProbeComponent::SerializeComponent(ezWorldWriter& stream) const

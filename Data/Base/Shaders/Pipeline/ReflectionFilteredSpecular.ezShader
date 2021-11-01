@@ -160,7 +160,7 @@ float4 main(PS_IN input) : SV_Target
   }
 
   float luminance = GetLuminance(inputColor);
-  inputColor = lerp(luminance, inputColor, Saturation) * Intensity;
+  //inputColor = lerp(luminance, inputColor, Saturation) * Intensity;
 
   return inputColor;
 }

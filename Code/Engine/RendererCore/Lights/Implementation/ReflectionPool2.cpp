@@ -248,39 +248,43 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
   probeData.m_fPriority += fPriority;
   const ezInt32 iMappedIndex = probeData.m_uiReflectionIndex;
 
-  ezStringBuilder sEnum;
-  ezReflectionUtils::EnumerationToString(probeData.m_Flags, sEnum, ezReflectionUtils::EnumConversionMode::ValueNameOnly);
-  ezStringBuilder s;
-  ezInt32 activeIndex = -1;
-  for (ezInt32 i = 0; i < (ezInt32)s_pData->m_DynamicUpdates.GetCount(); i++)
+  if (pComponent->GetOwner()->IsDynamic())
   {
-    if (s_pData->m_DynamicUpdates[i].Borrow() == probeData.m_pActiveUpdate)
-      activeIndex = i;
+    ezTransform globalTransform = pComponent->GetOwner()->GetGlobalTransform();
+    if (!probeData.m_Flags.IsSet(ezProbeFlags::Dynamic) && probeData.m_GlobalTransform != globalTransform)
+    {
+      probeData.m_Flags.Add(ezProbeFlags::Dirty);
+    }
+    probeData.m_GlobalTransform = globalTransform;
   }
 
-  s.Format("\n RefIdx: {}\nUpdateInx: {}\nFlags: {}\n", iMappedIndex, activeIndex, sEnum);
-  ezDebugRenderer::Draw3DText(pWorld, s, pComponent->GetOwner()->GetGlobalPosition(), ezColor::Violet);
+  // The sky light is always active and not added to the render data (always passes in nullptr as pRenderData).
+  if (pRenderData && iMappedIndex > 0 && probeData.m_Flags.IsSet(ezProbeFlags::Usable))
+  {
+    // Index and flags are stored in m_uiIndex so we can't just overwrite it.
+    pRenderData->m_uiIndex |= (ezUInt32)iMappedIndex;
+    msg.AddRenderData(pRenderData, ezDefaultRenderDataCategories::ReflectionProbe, ezRenderData::Caching::Never);
+  }
 
   if (probeData.m_pActiveUpdate != nullptr)
   {
     ProbeUpdateInfo& info = *probeData.m_pActiveUpdate;
-    EZ_ASSERT_DEBUG(info.m_UpdateTarget.m_Id == id, "");
+    EZ_ASSERT_DEBUG(info.m_UpdateTarget.m_Id == id && info.m_UpdateTarget.m_uiWorldIndex == uiWorldIndex, "");
     if (!info.m_bCalledThisFrame)
     {
       bool bDone = false;
       info.m_bCalledThisFrame = true;
       if (!info.m_UpdateSteps.IsEmpty())
       {
-        for (ezUInt32 i = info.m_UpdateSteps.GetCount(); i-- > 0;)
+        //for (ezUInt32 i = info.m_UpdateSteps.GetCount(); i-- > 0;)
+        for (ezUInt32 i = 0; i < info.m_UpdateSteps.GetCount(); ++i)
         {
           if (info.m_UpdateSteps[i].m_UpdateStep == UpdateStep::Filter)
           {
             bDone = true;
           }
 
-          ezTransform transform = pComponent->GetOwner()->GetGlobalTransform();
-          ProbeData& probeData = data.m_Probes.GetValueUnchecked(id.m_InstanceIndex);
-          s_pData->AddViewToRender(info.m_UpdateSteps[i], probeData, info, transform);
+          s_pData->AddViewToRender(info.m_UpdateSteps[i], probeData, info);
         }
 
         info.m_LastUpdateStep = info.m_UpdateSteps.PeekBack().m_UpdateStep;
@@ -296,29 +300,37 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
     }
   }
 
-
-  // The sky light is always active and not added to the render data (always passes in nullptr as pRenderData).
-  if (pRenderData && iMappedIndex > 0 && probeData.m_Flags.IsSet(ezProbeFlags::Usable))
-  {
-    // Index and flags are stored in m_uiIndex so we can't just overwrite it.
-    pRenderData->m_uiIndex |= (ezUInt32)iMappedIndex;
-    msg.AddRenderData(pRenderData, ezDefaultRenderDataCategories::ReflectionProbe, ezRenderData::Caching::Never);
-  }
-
-  // Not mapped in the atlas - cannot render it.
-  if (iMappedIndex < 0)
-    return;
-
 #if EZ_ENABLED(EZ_COMPILE_FOR_DEVELOPMENT)
   const ezUInt32 uiMipLevels = GetMipLevels();
   if (probeData.m_desc.m_bShowDebugInfo && s_pData->m_hDebugMaterial.GetCount() == uiMipLevels * s_uiNumReflectionProbeCubeMaps)
   {
+    if (msg.m_OverrideCategory == ezInvalidRenderDataCategory)
+    {
+      //#TODO: Remove / cleanup debug output
+      ezStringBuilder sEnum;
+      ezReflectionUtils::EnumerationToString(probeData.m_Flags, sEnum, ezReflectionUtils::EnumConversionMode::ValueNameOnly);
+      ezStringBuilder s;
+      ezInt32 activeIndex = -1;
+      for (ezInt32 i = 0; i < (ezInt32)s_pData->m_DynamicUpdates.GetCount(); i++)
+      {
+        if (s_pData->m_DynamicUpdates[i].Borrow() == probeData.m_pActiveUpdate)
+          activeIndex = i;
+      }
+
+      s.Format("\n RefIdx: {}\nUpdateInx: {}\nFlags: {}\n", iMappedIndex, activeIndex, sEnum);
+      ezDebugRenderer::Draw3DText(pWorld, s, pComponent->GetOwner()->GetGlobalPosition(), ezColor::Violet);
+    }
+
+    // Not mapped in the atlas - cannot render it.
+    if (iMappedIndex < 0)
+      return;
+
     const ezGameObject* pOwner = pComponent->GetOwner();
     const ezTransform ownerTransform = pOwner->GetGlobalTransform();
     for (ezUInt32 i = 0; i < uiMipLevels; i++)
     {
       ezMeshRenderData* pRenderData = ezCreateRenderDataForThisFrame<ezMeshRenderData>(pOwner);
-      pRenderData->m_GlobalTransform.m_vPosition = ownerTransform.m_vPosition;
+      pRenderData->m_GlobalTransform.m_vPosition = ownerTransform * probeData.m_desc.m_vCaptureOffset;
       pRenderData->m_GlobalTransform.m_vScale = ezVec3(1.0f);
       if (!probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
       {
@@ -333,7 +345,7 @@ void ezReflectionPool::ExtractReflectionProbe(const ezComponent* pComponent, ezM
       pRenderData->m_uiUniqueID = ezRenderComponent::GetUniqueIdForRendering(pComponent, 0);
 
       pRenderData->FillBatchIdAndSortingKey();
-      msg.AddRenderData(pRenderData, ezDefaultRenderDataCategories::LitOpaque, ezRenderData::Caching::IfStatic);
+      msg.AddRenderData(pRenderData, ezDefaultRenderDataCategories::LitOpaque, ezRenderData::Caching::Never);
     }
 
     if (msg.m_OverrideCategory == ezInvalidRenderDataCategory)

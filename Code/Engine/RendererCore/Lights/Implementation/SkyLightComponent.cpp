@@ -22,7 +22,7 @@ namespace
 } // namespace
 
 // clang-format off
-EZ_BEGIN_COMPONENT_TYPE(ezSkyLightComponent, 3, ezComponentMode::Dynamic)
+EZ_BEGIN_COMPONENT_TYPE(ezSkyLightComponent, 3, ezComponentMode::Static)
 {
   EZ_BEGIN_PROPERTIES
   {
@@ -31,9 +31,10 @@ EZ_BEGIN_COMPONENT_TYPE(ezSkyLightComponent, 3, ezComponentMode::Dynamic)
     EZ_ACCESSOR_PROPERTY("Saturation", GetSaturation, SetSaturation)->AddAttributes(new ezClampValueAttribute(0.0f, ezVariant()), new ezDefaultValueAttribute(1.0f)),
     EZ_SET_ACCESSOR_PROPERTY("IncludeTags", GetIncludeTags, InsertIncludeTag, RemoveIncludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default"), new ezDefaultValueAttribute(GetDefaultTags())),
     EZ_SET_ACCESSOR_PROPERTY("ExcludeTags", GetExcludeTags, InsertExcludeTag, RemoveExcludeTag)->AddAttributes(new ezTagSetWidgetAttribute("Default")),
-    EZ_ACCESSOR_PROPERTY("ShowDebugInfo", GetShowDebugInfo, SetShowDebugInfo),
+    EZ_ACCESSOR_PROPERTY("NearPlane", GetNearPlane, SetNearPlane)->AddAttributes(new ezDefaultValueAttribute(0.0f), new ezClampValueAttribute(0.0f, {}), new ezMinValueTextAttribute("Auto")),
+    EZ_ACCESSOR_PROPERTY("FarPlane", GetFarPlane, SetFarPlane)->AddAttributes(new ezDefaultValueAttribute(100.0f), new ezClampValueAttribute(0.01f, 10000.0f)),
     EZ_ACCESSOR_PROPERTY("CubeMap", GetCubeMapFile, SetCubeMapFile)->AddAttributes(new ezAssetBrowserAttribute("Texture Cube")),
-    EZ_ACCESSOR_PROPERTY("FarPlane", GetFarPlane, SetFarPlane)->AddAttributes(new ezDefaultValueAttribute(1000.0f), new ezClampValueAttribute(5.0, 10000.0f)),
+    EZ_ACCESSOR_PROPERTY("ShowDebugInfo", GetShowDebugInfo, SetShowDebugInfo),
   }
   EZ_END_PROPERTIES;
   EZ_BEGIN_MESSAGEHANDLERS
@@ -167,9 +168,15 @@ const char* ezSkyLightComponent::GetCubeMapFile() const
   return m_hCubeMap.IsValid() ? m_hCubeMap.GetResourceID().GetData() : "";
 }
 
+void ezSkyLightComponent::SetNearPlane(float fNearPlane)
+{
+  m_desc.m_fNearPlane = fNearPlane;
+  m_bStatesDirty = true;
+}
+
 void ezSkyLightComponent::SetFarPlane(float fFarPlane)
 {
-  m_fFarPlane = fFarPlane;
+  m_desc.m_fFarPlane = fFarPlane;
   m_bStatesDirty = true;
 }
 
@@ -206,7 +213,8 @@ void ezSkyLightComponent::SerializeComponent(ezWorldWriter& stream) const
   s << m_desc.m_fIntensity;
   s << m_desc.m_fSaturation;
   s << m_hCubeMap;
-  s << m_fFarPlane;
+  s << m_desc.m_fNearPlane;
+  s << m_desc.m_fFarPlane;
 }
 
 void ezSkyLightComponent::DeserializeComponent(ezWorldReader& stream)
@@ -227,7 +235,8 @@ void ezSkyLightComponent::DeserializeComponent(ezWorldReader& stream)
   }
   if (uiVersion >= 3)
   {
-    s >> m_fFarPlane;
+    s >> m_desc.m_fNearPlane;
+    s >> m_desc.m_fFarPlane;
   }
 }
 

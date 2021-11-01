@@ -206,7 +206,7 @@ struct ezReflectionPool::Data
   void DestroyWorldReflectionData(ezReflectionPool::Data::WorldReflectionData& data);
   void CreateReflectionViewsAndResources();
   void CreateSkyIrradianceTexture();
-  void AddViewToRender(const ProbeUpdateInfo::Step& step, const ProbeData& probeData, ProbeUpdateInfo& updateInfo, const ezTransform& transform);
+  void AddViewToRender(const ProbeUpdateInfo::Step& step, const ProbeData& probeData, ProbeUpdateInfo& updateInfo);
 
   ezMutex m_Mutex;
   ezUInt64 m_uiWorldHasSkyLight = 0;

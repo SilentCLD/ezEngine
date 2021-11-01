@@ -449,7 +449,7 @@ void ezReflectionPool::Data::CreateSkyIrradianceTexture()
   }
 }
 
-void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, const ProbeData& probeData, ProbeUpdateInfo& updateInfo, const ezTransform& transform)
+void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, const ProbeData& probeData, ProbeUpdateInfo& updateInfo)
 {
   ezVec3 vForward[6] = {
     ezVec3(1.0f, 0.0f, 0.0f),
@@ -485,8 +485,6 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
       pReflectionView = &m_RenderViews[step.m_uiViewIndex];
       uiFaceIndex = step.m_UpdateStep;
     }
-
-    ezVec3 vScale = vForward[uiFaceIndex].CompMul(transform.m_vScale);
 
     ezView* pView = nullptr;
     ezRenderWorld::TryGetView(pReflectionView->m_hView, pView);
@@ -526,33 +524,30 @@ void ezReflectionPool::Data::AddViewToRender(const ProbeUpdateInfo::Step& step, 
     }
     else
     {
-      if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
-      {
-        vScale = vScale.CompMul(probeData.m_vHalfExtents);
-      }
-      else if (probeData.m_Flags.IsSet(ezProbeFlags::Sphere))
-      {
-        vScale = vScale.CompMul(probeData.m_vHalfExtents);
-      }
-      else if (probeData.m_Flags.IsSet(ezProbeFlags::Box))
-      {
-        vScale = vScale.CompMul(probeData.m_vHalfExtents);
-      }
       renderTargetSetup.SetRenderTarget(0, pDevice->GetDefaultRenderTargetView(updateInfo.m_hCubemapProxies[uiFaceIndex]));
     }
     pView->SetRenderTargetSetup(renderTargetSetup);
 
-    ezVec3 vPosition = transform.m_vPosition;
-    ezVec3 vForward2 = transform.TransformDirection(vForward[uiFaceIndex]);
-    ezVec3 vUp2 = transform.TransformDirection(vUp[uiFaceIndex]);
+    ezVec3 vPosition = probeData.m_GlobalTransform * probeData.m_desc.m_vCaptureOffset;
+    ezVec3 vForward2 = probeData.m_GlobalTransform.TransformDirection(vForward[uiFaceIndex]);
+    ezVec3 vUp2 = probeData.m_GlobalTransform.TransformDirection(vUp[uiFaceIndex]);
     if (probeData.m_Flags.IsSet(ezProbeFlags::SkyLight))
     {
       vForward2 = vForward[uiFaceIndex];
       vUp2 = vUp[uiFaceIndex];
     }
 
-    const float fFar = ezMath::Max(0.01f, ezMath::Abs(vScale.x) + ezMath::Abs(vScale.y) + ezMath::Abs(vScale.z)); // Only one component is actually set due to multiplying with vForward.
-    const float fNear = (0.1f >= fFar) ? fFar / 2.0f : 0.1f;
+    const float fFar = probeData.m_desc.m_fFarPlane;
+    float fNear = probeData.m_desc.m_fNearPlane;
+    if (fNear >= fFar)
+    {
+      fNear = fFar - 0.001f;
+    }
+    else if (fNear == 0.0f)
+    {
+      fNear = fFar / 1000.0f;
+    }
+
     pReflectionView->m_Camera.LookAt(vPosition, vPosition + vForward2, vUp2);
     pReflectionView->m_Camera.SetCameraMode(ezCameraMode::PerspectiveFixedFovX, 90.0f, fNear, fFar);
     ezRenderWorld::AddViewToRender(pReflectionView->m_hView);
