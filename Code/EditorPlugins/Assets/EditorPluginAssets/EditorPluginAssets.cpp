@@ -12,6 +12,7 @@
 #include <EditorFramework/Actions/ViewLightActions.h>
 #include <EditorPluginAssets/AnimationClipAsset/AnimationClipAsset.h>
 #include <EditorPluginAssets/DecalAsset/DecalAsset.h>
+#include <EditorPluginAssets/Dialogs/ShaderTemplateDlg.moc.h>
 #include <EditorPluginAssets/LUTAsset/LUTAssetObjects.h>
 #include <EditorPluginAssets/LUTAsset/LUTAssetWindow.moc.h>
 #include <EditorPluginAssets/MaterialAsset/MaterialAsset.h>
@@ -506,6 +507,18 @@ static void ConfigureImageDataAsset()
   }
 }
 
+ezVariant CustomAction_CreateShaderFromTemplate(const ezDocument* pDoc)
+{
+  ezQtShaderTemplateDlg dlg(nullptr, pDoc);
+
+  if (dlg.exec() == QDialog::Accepted)
+  {
+    return dlg.m_sResult;
+  }
+
+  return {};
+}
+
 void OnLoadPlugin()
 {
   ezQtEditorApp::GetSingleton()->AddRuntimePluginDependency("EditorPluginAssets", "ezEnginePluginAssets");
@@ -528,6 +541,8 @@ void OnLoadPlugin()
   ConfigureSkeletonAsset();
   ConfigureAnimatedMeshAsset();
   ConfigureImageDataAsset();
+
+  ezDocumentManager::s_CustomActions["CustomAction_CreateShaderFromTemplate"] = CustomAction_CreateShaderFromTemplate;
 }
 
 void OnUnloadPlugin()

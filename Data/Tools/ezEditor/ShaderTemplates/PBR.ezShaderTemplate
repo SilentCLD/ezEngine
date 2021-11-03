@@ -1,0 +1,259 @@
+[TEMPLATE_VARS]
+bool TEMPLATE_METALLIC_TEXTURE = false;
+bool TEMPLATE_ROUGHNESS_TEXTURE = true;
+enum TEMPLATE_LIGHTING { TEMPLATE_LIGHTING_SIMPLE = 0, TEMPLATE_LIGHTING_ADVANCED = 1, default = 1 };
+
+
+[PLATFORMS]
+ALL
+
+[PERMUTATIONS]
+
+BLEND_MODE
+RENDER_PASS
+SHADING_MODE
+TWO_SIDED
+FLIP_WINDING
+FORWARD_PASS_WRITE_DEPTH
+MSAA
+CAMERA_MODE
+SHADING_QUALITY
+VERTEX_SKINNING
+
+[MATERIALPARAMETER]
+
+Permutation BLEND_MODE;
+Permutation SHADING_MODE;
+Permutation TWO_SIDED;
+
+float MaskThreshold @Default(0.25);
+
+bool UseBaseTexture;
+Texture2D BaseTexture;
+Color BaseColor @Default(Color(1.0, 1.0, 1.0));
+
+bool UseNormalAndRoughnessTexture;
+Texture2D NormalTexture;
+
+%ifdef TEMPLATE_ROUGHNESS_TEXTURE
+Texture2D RoughnessTexture;
+%endif
+
+float RoughnessValue @Default(0.7) @Clamp(0.0, 1.0);
+
+%ifdef TEMPLATE_METALLIC_TEXTURE
+bool UseMetallicTexture;
+Texture2D MetallicTexture;
+float MetallicValue @Default(0.0) @Clamp(0.0, 1.0);
+%endif
+
+%if TEMPLATE_LIGHTING == TEMPLATE_LIGHTING_ADVANCED
+bool UseEmissiveTexture;
+Texture2D EmissiveTexture;
+Color EmissiveColor @Default(Color(0.0, 0.0, 0.0));
+%endif
+
+bool UseOcclusionTexture;
+Texture2D OcclusionTexture;
+
+[RENDERSTATE]
+
+#include <Shaders/Materials/MaterialState.h>
+
+[VERTEXSHADER]
+
+#define USE_NORMAL
+#define USE_TANGENT
+#define USE_TEXCOORD0
+
+#if VERTEX_SKINNING
+  #define USE_SKINNING
+#endif
+
+#if RENDER_PASS == RENDER_PASS_EDITOR
+  #define USE_DEBUG_INTERPOLATOR
+#endif
+
+#include <Shaders/Materials/DefaultMaterialCB.h>
+#include <Shaders/Materials/MaterialVertexShader.h>
+
+VS_OUT main(VS_IN Input)
+{
+  return FillVertexData(Input);
+}
+
+
+[GEOMETRYSHADER]
+
+#define USE_NORMAL
+#define USE_TANGENT
+#define USE_TEXCOORD0
+
+#include <Shaders/Materials/MaterialStereoGeometryShader.h>
+
+
+[PIXELSHADER]
+
+#define USE_NORMAL
+#define USE_TANGENT
+#define USE_TEXCOORD0
+#define USE_SIMPLE_MATERIAL_MODEL
+#define USE_MATERIAL_EMISSIVE
+#define USE_MATERIAL_OCCLUSION
+#define USE_TWO_SIDED_LIGHTING
+#define USE_DECALS
+#define USE_FOG
+
+#if RENDER_PASS == RENDER_PASS_EDITOR
+  #define USE_DEBUG_INTERPOLATOR
+#endif
+
+#include <Shaders/Materials/DefaultMaterialCB.h>
+#include <Shaders/Materials/MaterialPixelShader.h>
+
+Texture2D BaseTexture;
+SamplerState BaseTexture_AutoSampler;
+
+Texture2D NormalTexture;
+SamplerState NormalTexture_AutoSampler;
+
+%ifdef TEMPLATE_METALLIC_TEXTURE
+Texture2D MetallicTexture;
+SamplerState MetallicTexture_AutoSampler;
+%endif
+
+%ifdef TEMPLATE_ROUGHNESS_TEXTURE
+Texture2D RoughnessTexture;
+SamplerState RoughnessTexture_AutoSampler;
+%endif
+
+Texture2D EmissiveTexture;
+SamplerState EmissiveTexture_AutoSampler;
+
+Texture2D OcclusionTexture;
+SamplerState OcclusionTexture_AutoSampler;
+
+float3 GetNormal()
+{
+  [branch]
+  if (UseNormalAndRoughnessTexture)
+  {
+    float3 normalTS = DecodeNormalTexture(NormalTexture.Sample(NormalTexture_AutoSampler, G.Input.TexCoord0.xy));
+    return TangentToWorldSpace(normalTS);
+  }
+  else
+  {
+    return G.Input.Normal;
+  }
+}
+
+float3 GetBaseColor()
+{
+  float3 baseColor = BaseColor.rgb * GetInstanceData().Color.rgb;
+
+  // note that the default material actually doesn't support per-vertex colors
+#if defined(USE_COLOR0)  
+  baseColor *= G.Input.Color0;
+#endif
+
+  [branch]
+  if (UseBaseTexture)
+  {
+    baseColor *= BaseTexture.Sample(BaseTexture_AutoSampler, G.Input.TexCoord0.xy).rgb;
+  }
+
+  return baseColor;
+}
+
+%ifdef TEMPLATE_METALLIC_TEXTURE
+float GetMetallic()
+{
+  [branch]
+  if (UseMetallicTexture)
+  {
+    return MetallicTexture.Sample(MetallicTexture_AutoSampler, G.Input.TexCoord0.xy).r;
+  }
+  else
+  {
+    return MetallicValue;
+  }
+}
+%else
+float GetMetallic()
+{
+  return 0;
+}
+%endif
+
+float GetReflectance()
+{
+  return 0.5f;
+}
+
+%ifdef TEMPLATE_ROUGHNESS_TEXTURE
+float GetRoughness()
+{
+  [branch]
+  if (UseNormalAndRoughnessTexture)
+  {
+    return RoughnessTexture.Sample(RoughnessTexture_AutoSampler, G.Input.TexCoord0.xy).r;
+  }
+  else
+  {
+    return RoughnessValue;
+  }
+}
+%else
+float GetRoughness()
+{
+  return RoughnessValue;
+}
+%endif
+
+float GetOpacity()
+{
+  float opacity = BaseColor.a * GetInstanceData().Color.a;
+
+  [branch]
+  if (UseBaseTexture)
+  {
+    opacity *= BaseTexture.Sample(BaseTexture_AutoSampler, G.Input.TexCoord0.xy).a;
+  }
+
+  #if BLEND_MODE == BLEND_MODE_MASKED
+    return opacity - MaskThreshold;
+  #else
+    return opacity;
+  #endif
+}
+
+float3 GetEmissiveColor()
+{
+  %if TEMPLATE_LIGHTING == TEMPLATE_LIGHTING_ADVANCED
+  [branch]
+  if (UseEmissiveTexture)
+  {
+    return EmissiveTexture.Sample(EmissiveTexture_AutoSampler, G.Input.TexCoord0.xy).rgb * EmissiveColor.rgb;
+  }
+  else
+  {
+    return EmissiveColor.rgb;
+  }
+  %endif
+  %if TEMPLATE_LIGHTING == TEMPLATE_LIGHTING_SIMPLE
+    return float3(0, 0, 0);
+  %endif
+}
+
+float GetOcclusion()
+{
+  [branch]
+  if (UseOcclusionTexture)
+  {
+    return OcclusionTexture.Sample(OcclusionTexture_AutoSampler, G.Input.TexCoord0.xy).r;
+  }
+  else
+  {
+    return 1.0f;
+  }
+}
